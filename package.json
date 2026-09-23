@@ -1,0 +1,11 @@
+{
+  "name": "backend-sync",
+  "version": "0.1.0",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "test": "node --test",
+    "start": "electron .",
+    "package": "electron-packager . \"Backend Sync\" --platform=darwin --out=dist --overwrite --ignore=\"^/(dist|test|docs|scripts)\""
+  }
+}
