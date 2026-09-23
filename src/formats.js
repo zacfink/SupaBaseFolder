@@ -49,14 +49,19 @@ function coerceRows(rows, columns, firstRow = 1) {
   return { rows: out, warnings: [...warnings] }
 }
 
+// Which columns actually appear in the raw file, before coercion fills the rest with null —
+// so callers can tell "column has no value anywhere" from "column header/key is gone".
+const keysOf = rows => new Set(rows.flatMap(r => (r && typeof r === 'object' && !Array.isArray(r)) ? Object.keys(r) : []))
+
 function readTable(file, columns) {
   if (file.endsWith('.json')) {
     const rows = JSON.parse(fs.readFileSync(file, 'utf8'))
     if (!Array.isArray(rows)) throw new Error('the file must be a JSON array of rows')
-    return coerceRows(rows, columns, 1)
+    return { ...coerceRows(rows, columns, 1), keys: keysOf(rows) }
   }
   const wb = XLSX.read(fs.readFileSync(file), { cellDates: true })
-  return coerceRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: null }), columns, 2)
+  const raw = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: null })
+  return { ...coerceRows(raw, columns, 2), keys: keysOf(raw) }
 }
 
 // Written to a temp file and renamed, so a half-written file is never read.
