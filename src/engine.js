@@ -97,12 +97,15 @@ class Project {
   snapFile(table) { return path.join(this.meta, 'snapshots', `${table}.json`) }
   insertedFile(table) { return path.join(this.meta, 'inserted', `${table}.json`) }
 
-  // Remember which new rows reached Supabase when we couldn't write their ids back to the file
-  // (a race, a drop mid-push, or the file held by another app), so the next sync's matching
-  // local row (by content) is reattached instead of inserted a second time.
-  persistInserts(table, inserted) {
-    if (!inserted.size) return
-    writeJson(this.insertedFile(table), [...inserted].map(([row, r]) => ({ key: stable(withoutId(row)), id: r.id })))
+  // Entries reattached this run (still not written back) plus this run's own fresh inserts —
+  // both need to survive if the run ends up not writing the file, so the next sync can still
+  // match them instead of inserting again. Called on every exit that doesn't write; the matching
+  // `wrote` branch clears the file outright instead (the ids are durably in it by then).
+  savePendingInserts(table, matched, inserted = new Map()) {
+    const fresh = [...inserted].map(([row, r]) => ({ key: stable(withoutId(row)), id: r.id }))
+    const entries = [...matched, ...fresh]
+    if (entries.length) writeJson(this.insertedFile(table), entries)
+    else fs.rmSync(this.insertedFile(table), { force: true })
   }
 
   // Saves, Excel's ~$ lock file appearing or clearing, and our own writes all land here.
@@ -156,19 +159,23 @@ class Project {
     }
     const { warnings } = local
     let reattached = false // did we just fill in an id below? then local.rows no longer matches what's on disk, even if it now equals what we're about to write
+    let matched = [] // pending-insert entries reattached this run; re-saved below if this run doesn't end up writing them to the file
 
     if (exists && local.rows.length) {
       // A row we inserted last time but couldn't write the id back for (a race or a drop
       // mid-push): reattach its real id now, before diffing, so it's matched instead of
-      // inserted again. Each entry only gets one run to match.
-      const pending = readJson(this.insertedFile(table), [])
+      // inserted again. Not consumed here — only once the ids are actually written to the file
+      // (see the `wrote` branch below); a run that has to bail before then re-saves `matched`
+      // so a second consecutive failure doesn't lose them.
+      const localIds = new Set(local.rows.filter(r => r.id != null).map(r => String(r.id)))
+      const pending = readJson(this.insertedFile(table), []).filter(e => !localIds.has(String(e.id))) // stale: this id's already in the file
       if (pending.length) {
         const used = new Set()
         for (const entry of pending) {
           const i = local.rows.findIndex((r, idx) => r.id == null && !used.has(idx) && stable(withoutId(r)) === entry.key)
-          if (i !== -1) { local.rows[i] = { ...local.rows[i], id: entry.id }; used.add(i); reattached = true }
+          if (i !== -1) { local.rows[i] = { ...local.rows[i], id: entry.id }; used.add(i); reattached = true; matched.push(entry) }
+          // no match this run: expires here, not carried forward
         }
-        fs.rmSync(this.insertedFile(table), { force: true })
       }
       // A copied row that kept its id would push over the original and the copy would vanish, unlogged.
       const firstRow = file.endsWith('.json') ? 1 : 2
@@ -176,6 +183,7 @@ class Project {
       for (const [i, row] of local.rows.entries()) {
         if (row.id == null) continue
         if (seenAt.has(row.id)) {
+          this.savePendingInserts(table, matched)
           return this.set(table, { state: 'paused', warnings, reason: `Rows ${seenAt.get(row.id)} and ${i + firstRow} both have id ${row.id}. Give the new row an empty id, then save.` })
         }
         seenAt.set(row.id, i + firstRow)
@@ -184,6 +192,7 @@ class Project {
       if (!confirmDeletes) {
         const wiped = Object.keys(columns).find(col => !local.keys.has(col) && snap.some(r => r[col] != null))
         if (wiped) {
+          this.savePendingInserts(table, matched)
           return this.set(table, { state: 'paused', needsConfirm: true, warnings, reason: `The column "${wiped}" is missing from the file, so this save would empty it in Supabase.` })
         }
       }
@@ -193,6 +202,7 @@ class Project {
     try {
       fetched = await withTimeout(this.remote.fetchAll(table))
     } catch (e) {
+      this.savePendingInserts(table, matched)
       const { push } = diff(snap, local.rows, snap)
       return this.set(table, { state: 'offline', reason: e.message, warnings, pending: push.inserts.length + push.updates.length + push.deletes.length })
     }
@@ -200,6 +210,7 @@ class Project {
 
     const d = diff(snap, local.rows, remote, { localMtime: statBefore ? statBefore.mtimeMs : 0 })
     if (tooManyDeletes(d) && !confirmDeletes) {
+      this.savePendingInserts(table, matched)
       return this.set(table, { state: 'paused', needsConfirm: true, warnings, reason: `This save would delete ${d.push.deletes.length} rows from Supabase.` })
     }
 
@@ -237,8 +248,9 @@ class Project {
 
     if (networkError) {
       // Some of this may have already reached Supabase (e.g. an insert, before an update hung).
-      // Remember new ids so they aren't inserted again, and fold what succeeded into the snapshot.
-      this.persistInserts(table, inserted)
+      // Remember new ids (this run's plus any reattached-but-unwritten from before) so they
+      // aren't inserted again, and fold what succeeded into the snapshot.
+      this.savePendingInserts(table, matched, inserted)
       writeJson(this.snapFile(table), applyChanges(snap, saved))
       const { push } = diff(snap, local.rows, snap)
       return this.set(table, { state: 'offline', reason: networkError.message, warnings, pending: push.inserts.length + push.updates.length + push.deletes.length })
@@ -261,12 +273,15 @@ class Project {
           wrote = false // another app holds the file: handle it like an Excel lock below
         }
       }
-      if (wrote) return this.finish(table, after, d.conflicts, { pushed: saved.length, pulled: d.pull.upserts.length + d.pull.deletes.length }, status)
+      if (wrote) {
+        fs.rmSync(this.insertedFile(table), { force: true }) // ids (reattached or freshly inserted) are durably in the file now
+        return this.finish(table, after, d.conflicts, { pushed: saved.length, pulled: d.pull.upserts.length + d.pull.deletes.length }, status)
+      }
     }
-    // Can't write the file: remember any new ids so the next sync doesn't insert them again, and
-    // fold what we pushed into the snapshot (as the file has it), so the remote changes show up
-    // again as "pull" on every sync until the file is free.
-    this.persistInserts(table, inserted)
+    // Can't write the file: remember any new ids (reattached or freshly inserted) so the next
+    // sync doesn't insert them again, and fold what we pushed into the snapshot (as the file has
+    // it), so the remote changes show up again as "pull" on every sync until the file is free.
+    this.savePendingInserts(table, matched, inserted)
     if (raced) this.schedule(table) // make sure the edit we skipped over still gets synced
     const pending = d.pull.upserts.length + d.pull.deletes.length
     this.finish(table, applyChanges(snap, saved), d.conflicts.filter(c => c.kept === 'local'), { pushed: saved.length, pulled: 0 },
