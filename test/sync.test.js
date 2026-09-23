@@ -90,6 +90,7 @@ test('applyChanges upserts and deletes by id', () => {
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
+const XLSX = require('xlsx')
 const { coerceRows, readTable, writeTable } = require('../src/formats')
 
 const cols = {
@@ -124,4 +125,28 @@ test('xlsx and json round-trip', () => {
   }
   writeTable(path.join(dir, 'empty.xlsx'), [], cols)
   assert.deepEqual(readTable(path.join(dir, 'empty.xlsx'), cols).rows, [])
+})
+
+test('Excel Date cells coerce to wall-clock time', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bsync-'))
+  const dateCols = {
+    id: { type: 'integer' },
+    event_at: { type: 'string', format: 'timestamp without time zone' },
+    created: { type: 'string', format: 'date' },
+  }
+  // Create a Date in local time (9/24/2026 18:00)
+  const localDate = new Date(2026, 8, 24, 18, 0, 0, 0)
+  const file = path.join(dir, 'dates.xlsx')
+  const ws = XLSX.utils.aoa_to_sheet([
+    ['id', 'event_at', 'created'],
+    [1, localDate, localDate],
+  ])
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
+  XLSX.writeFile(wb, file)
+
+  const { rows } = readTable(file, dateCols)
+  // Verify wall-clock time is preserved (local time 18:00 should stay as 18:00)
+  assert.match(rows[0].event_at, /2026-09-24T18:00:00/)
+  assert.equal(rows[0].created, '2026-09-24')
 })
