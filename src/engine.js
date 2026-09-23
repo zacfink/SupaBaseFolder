@@ -101,9 +101,11 @@ class Project {
   // both need to survive if the run ends up not writing the file, so the next sync can still
   // match them instead of inserting again. Called on every exit that doesn't write; the matching
   // `wrote` branch clears the file outright instead (the ids are durably in it by then).
+  // matched === null: this run never read the entries file, so keep what's there and only add to it.
   savePendingInserts(table, matched, inserted = new Map()) {
     const fresh = [...inserted].map(([row, r]) => ({ key: stable(withoutId(row)), id: r.id }))
-    const entries = [...matched, ...fresh]
+    if (matched === null && !fresh.length) return
+    const entries = [...(matched ?? readJson(this.insertedFile(table), [])), ...fresh]
     if (entries.length) writeJson(this.insertedFile(table), entries)
     else fs.rmSync(this.insertedFile(table), { force: true })
   }
@@ -159,9 +161,10 @@ class Project {
     }
     const { warnings } = local
     let reattached = false // did we just fill in an id below? then local.rows no longer matches what's on disk, even if it now equals what we're about to write
-    let matched = [] // pending-insert entries reattached this run; re-saved below if this run doesn't end up writing them to the file
+    let matched = null // null until the entries file is read below; pending-insert entries reattached this run; re-saved below if this run doesn't end up writing them to the file
 
     if (exists && local.rows.length) {
+      matched = []
       // A row we inserted last time but couldn't write the id back for (a race or a drop
       // mid-push): reattach its real id now, before diffing, so it's matched instead of
       // inserted again. Not consumed here — only once the ids are actually written to the file
@@ -274,7 +277,7 @@ class Project {
         }
       }
       if (wrote) {
-        fs.rmSync(this.insertedFile(table), { force: true }) // ids (reattached or freshly inserted) are durably in the file now
+        if (matched !== null) fs.rmSync(this.insertedFile(table), { force: true }) // ids (reattached or freshly inserted) are durably in the file now
         return this.finish(table, after, d.conflicts, { pushed: saved.length, pulled: d.pull.upserts.length + d.pull.deletes.length }, status)
       }
     }
