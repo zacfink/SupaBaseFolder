@@ -86,3 +86,42 @@ test('applyChanges upserts and deletes by id', () => {
   const out = applyChanges([row(1, 'a'), row(2, 'b')], [row(2, 'B'), row(3, 'c'), { id: 1, _deleted: true }])
   assert.deepEqual(out, [row(2, 'B'), row(3, 'c')])
 })
+
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
+const { coerceRows, readTable, writeTable } = require('../src/formats')
+
+const cols = {
+  id: { type: 'integer', format: 'bigint' },
+  title: { type: 'string', format: 'text' },
+  capacity: { type: 'integer', format: 'integer' },
+  published: { type: 'boolean', format: 'boolean' },
+  starts_at: { type: 'string', format: 'timestamp with time zone' },
+  meta: { format: 'jsonb' },
+}
+
+test('coerceRows converts values, fills missing columns, warns on unknown ones', () => {
+  const { rows, warnings } = coerceRows([{ id: '4', title: 'T', capacity: '60', published: 'TRUE', starts_at: '2026-09-24T18:00:00-04:00', meta: '{"a":1}', extra: 1 }], cols)
+  assert.deepEqual(rows, [{ id: 4, title: 'T', capacity: 60, published: true, starts_at: '2026-09-24T22:00:00.000Z', meta: { a: 1 } }])
+  assert.deepEqual(warnings, ['Column "extra" isn\'t in Supabase, so it\'s ignored'])
+  assert.deepEqual(coerceRows([{ title: 'x' }], cols).rows[0], { id: null, title: 'x', capacity: null, published: null, starts_at: null, meta: null })
+})
+
+test('coerceRows names the row and column it cannot read', () => {
+  assert.throws(() => coerceRows([{ id: 1 }, { id: 2, capacity: 'abc' }], cols, 2), /Row 3, capacity: "abc" is not a number/)
+})
+
+test('xlsx and json round-trip', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bsync-'))
+  const rows = [
+    { id: 1, title: 'Tutorial', capacity: 60, published: true, starts_at: '2026-09-24T22:00:00.000Z', meta: { tags: ['web'] } },
+    { id: 2, title: 'Empty', capacity: null, published: false, starts_at: null, meta: null },
+  ]
+  for (const file of ['t.xlsx', 't.json'].map(f => path.join(dir, f))) {
+    writeTable(file, rows, cols)
+    assert.deepEqual(readTable(file, cols).rows, rows)
+  }
+  writeTable(path.join(dir, 'empty.xlsx'), [], cols)
+  assert.deepEqual(readTable(path.join(dir, 'empty.xlsx'), cols).rows, [])
+})
