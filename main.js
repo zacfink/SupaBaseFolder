@@ -1,4 +1,4 @@
-const { app, Tray, BrowserWindow, ipcMain, shell, nativeImage, safeStorage } = require('electron')
+const { app, Tray, Menu, BrowserWindow, ipcMain, shell, nativeImage, safeStorage } = require('electron')
 const fs = require('node:fs')
 const path = require('node:path')
 const { execFile } = require('node:child_process')
@@ -78,7 +78,9 @@ ipcMain.handle('log', (_, name) => get(name).readLog())
 ipcMain.handle('reveal', () => shell.openPath(ROOT))
 ipcMain.handle('add', async (_, { name, url, key }) => {
   name = name.trim()
-  url = url.trim().replace(/\/$/, '')
+  key = key.trim()
+  url = url.trim()
+  try { url = new URL(url).origin } catch {} // drop a pasted path like /rest/v1; a bad URL fails the check below
   if (!/^\w[\w .-]*$/.test(name) || projects.has(name)) throw new Error('Pick a new folder name: letters, numbers, spaces, - . _')
   if (!/^https:\/\/\S+$/.test(url)) throw new Error('The URL should look like https://xyz.supabase.co')
   await fetchSchema(url, key) // fails fast on a wrong URL or key
@@ -87,7 +89,9 @@ ipcMain.handle('add', async (_, { name, url, key }) => {
   startProject(name)
 })
 
-app.whenReady().then(() => {
+// A second copy would run a second sync engine over the same folders.
+if (!app.requestSingleInstanceLock()) app.quit()
+else app.whenReady().then(() => {
   app.dock?.hide()
   const firstRun = !fs.existsSync(ROOT)
   fs.mkdirSync(ROOT, { recursive: true })
@@ -105,6 +109,7 @@ app.whenReady().then(() => {
     win.show()
     refresh()
   })
+  tray.on('right-click', () => tray.popUpContextMenu(Menu.buildFromTemplate([{ label: 'Quit Backend Sync', click: () => app.quit() }])))
   for (const name of Project.list()) startProject(name)
   if (firstRun) shell.openPath(ROOT) // no API adds a sidebar favourite; the window tells Zac to drag it in
   setInterval(() => projects.forEach(p => p.syncAll()), SYNC_EVERY_MS)

@@ -1,4 +1,5 @@
 // Sync one project without the menu bar app, for testing the engine.
+// Don't run it while the menu bar app is open: two engines on one folder race each other.
 // First run:  SUPABASE_KEY=... node scripts/headless.js Test https://<ref>.supabase.co
 // After that: SUPABASE_KEY=... node scripts/headless.js Test
 const { Project } = require('../src/engine')

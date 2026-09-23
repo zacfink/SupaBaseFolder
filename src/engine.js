@@ -155,13 +155,14 @@ class Project {
 
     let local
     try {
-      local = exists ? readTable(file, columns) : { rows: snap, warnings: [], keys: null } // a missing file is recreated, never read as "delete everything"
+      local = exists ? readTable(file, columns, snap) : { rows: snap, warnings: [], keys: null } // a missing file is recreated, never read as "delete everything"
     } catch (e) {
       return this.set(table, { state: 'paused', reason: `${path.basename(file)} can't be read (${e.message}). Nothing syncs until it's fixed and saved.` })
     }
     const { warnings } = local
     let reattached = false // did we just fill in an id below? then local.rows no longer matches what's on disk, even if it now equals what we're about to write
     let matched = null // null until the entries file is read below; pending-insert entries reattached this run; re-saved below if this run doesn't end up writing them to the file
+    let wiped = [] // columns whose header is gone from the sheet; checked with the delete guard below, so one confirm covers everything shown
 
     if (exists && local.rows.length) {
       matched = []
@@ -191,14 +192,8 @@ class Project {
         }
         seenAt.set(row.id, i + firstRow)
       }
-      // A column deleted from the header (or dropped from every JSON row) would silently wipe it in Supabase.
-      if (!confirmDeletes) {
-        const wiped = Object.keys(columns).find(col => !local.keys.has(col) && snap.some(r => r[col] != null))
-        if (wiped) {
-          this.savePendingInserts(table, matched)
-          return this.set(table, { state: 'paused', needsConfirm: true, warnings, reason: `The column "${wiped}" is missing from the file, so this save would empty it in Supabase.` })
-        }
-      }
+      // A column deleted from the header would silently wipe it in Supabase.
+      wiped = Object.keys(columns).filter(col => !local.keys.has(col) && snap.some(r => r[col] != null))
     }
 
     let fetched
@@ -212,14 +207,22 @@ class Project {
     const remote = coerceRows(fetched, columns).rows
 
     const d = diff(snap, local.rows, remote, { localMtime: statBefore ? statBefore.mtimeMs : 0 })
-    if (tooManyDeletes(d) && !confirmDeletes) {
+    const guards = confirmDeletes ? [] : [
+      ...wiped.map(col => `The column "${col}" is missing from the file, so this save would empty it in Supabase.`),
+      ...(tooManyDeletes(d) ? [`This save would delete ${d.push.deletes.length} rows from Supabase.`] : []),
+    ]
+    if (guards.length) {
       this.savePendingInserts(table, matched)
-      return this.set(table, { state: 'paused', needsConfirm: true, warnings, reason: `This save would delete ${d.push.deletes.length} rows from Supabase.` })
+      return this.set(table, { state: 'paused', needsConfirm: true, warnings, reason: guards.join(' ') })
     }
 
     const locked = this.locked(table)
     const canon = row => coerceRows([row], columns).rows[0]
     const saved = [], inserted = new Map(), rejected = new Set(), errors = []
+    // What an update or delete replaced in Supabase, logged so restore can undo it (conflicts log their own loser).
+    const before = new Map(snap.map(r => [String(r.id), r]))
+    const conflicted = new Set(d.conflicts.map(c => String(c.id)))
+    const logLost = (type, id) => { if (before.has(String(id)) && !conflicted.has(String(id))) this.log({ table, type, id, lost: before.get(String(id)) }) }
     let networkError = null
     const attempt = async (row, write) => {
       try { return await withTimeout(write()) } catch (e) {
@@ -237,13 +240,14 @@ class Project {
     for (const row of d.push.updates) {
       if (networkError) break
       const result = await attempt(row, () => this.remote.upsert(table, row))
-      if (result) saved.push(canon(result))
+      if (result) { saved.push(canon(result)); logLost('overwritten', row.id) }
     }
     const failedDeletes = new Set() // keep these out of the file and the snapshot's view, so the delete retries next sync
     for (const id of d.push.deletes) {
       if (networkError) break
       if (await attempt({ id }, () => this.remote.remove(table, id).then(() => true))) {
         saved.push({ id, _deleted: true })
+        logLost('deleted', id)
       } else if (!networkError) {
         failedDeletes.add(String(id))
       }
@@ -305,7 +309,9 @@ class Project {
 
   readLog(limit = 50) {
     try {
-      return fs.readFileSync(path.join(this.meta, 'log.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l)).slice(-limit).reverse()
+      // A corrupt line (a crash mid-append) is skipped, not allowed to hide the whole log.
+      const entries = fs.readFileSync(path.join(this.meta, 'log.jsonl'), 'utf8').split('\n').flatMap(l => { try { return [JSON.parse(l)] } catch { return [] } })
+      return entries.slice(-limit).reverse()
     } catch {
       return []
     }
@@ -341,7 +347,8 @@ class Project {
       'Each file here is a Supabase table. Edit it and save; the change reaches Supabase within seconds.', '',
       '- Every row needs an `id`. Leave it empty on a new row and the app fills it in.',
       '- Only the columns below exist. A new column has to be created in Supabase first.',
-      '- AI editing: prefer the `.json` tables. Write every column on every row; a missing column pauses the table.',
+      '- AI editing: prefer the `.json` tables. A key left out of a row that has an `id` keeps its current value; on a new row (empty `id`) it gets the column default.',
+      '- In a `.xlsx` table, deleting a column header pauses the table until it is confirmed in the menu bar app.',
       '- A save that deletes more than 5 rows pauses the table until it is confirmed in the menu bar app.',
       '- Live updates from Supabase need the table in the `supabase_realtime` publication; without it they arrive within 30 seconds.',
       '- Re-read a table file right before editing it; the app rewrites it when Supabase changes.', '',

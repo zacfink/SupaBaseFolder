@@ -7,14 +7,19 @@ const headers = key => (key.startsWith('eyJ') ? { apikey: key, Authorization: `B
 // Tables and column types from PostgREST's OpenAPI description. Needs the service_role / secret key.
 async function fetchSchema(url, key) {
   const res = await fetch(`${url}/rest/v1/`, { headers: headers(key) })
-  if (!res.ok) throw new Error(`Supabase answered ${res.status} ${res.statusText}`)
+  if (!res.ok) {
+    let { message } = await res.json().catch(() => ({}))
+    if (message === 'Invalid API key') message += ' (use the secret key from this same project, copied with the copy icon)'
+    throw new Error(`Supabase answered ${res.status} ${res.statusText}${message ? `: ${message}` : ''}`)
+  }
   const { definitions = {} } = await res.json()
   return Object.fromEntries(Object.entries(definitions).map(([table, d]) => [table, { columns: d.properties ?? {}, required: d.required ?? [] }]))
 }
 
 function connect(url, key) {
   const db = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } })
-  const check = ({ data, error }) => {
+  const check = ({ data, error, status }) => {
+    if (error && status === 0) throw new TypeError(error.message) // never reached Supabase (offline, DNS): not a rejection
     if (error) throw new Error(error.message)
     return data
   }

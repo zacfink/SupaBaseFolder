@@ -29,7 +29,8 @@
   <form id="add">
     <input name="name" placeholder="Folder name, e.g. QWeb" required>
     <input name="url" placeholder="https://xyz.supabase.co" required>
-    <input name="key" type="password" placeholder="service_role or secret key" required>
+    <input name="key" type="password" placeholder="sb_secret_… key" required>
+    <span class="muted">Supabase → Project Settings → API Keys → Secret keys. Use the copy icon; selecting the text copies the •••• mask.</span>
     <button>Add and pull every table</button>
     <span id="err" class="why"></span>
   </form>
@@ -43,7 +44,9 @@ let openLog = null
 function describe(e) {
   const when = new Date(e.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
   if (e.type === 'sync') return `${when} · ${e.table}: ${e.pushed} up, ${e.pulled} down`
-  if (e.type === 'restore') return `${when} · ${e.table}: restored an overwritten version`
+  if (e.type === 'restore') return `${when} · ${e.table}: restored an earlier version`
+  if (e.type === 'deleted') return `${when} · ${e.table} row ${e.id}: deleted from Supabase`
+  if (e.type === 'overwritten') return `${when} · ${e.table} row ${e.id}: updated in Supabase`
   return `${when} · ${e.table} row ${e.id}: kept the ${e.kept === 'local' ? 'file' : 'Supabase'} version${e.reason ? ` (${e.reason})` : ''}`
 }
 
@@ -53,7 +56,7 @@ async function showLog(name, el) {
   if (!entries.length) el.append(h('div', { className: 'muted', textContent: 'Nothing yet.' }))
   for (const e of entries) {
     const line = h('div', { textContent: describe(e) + ' ' })
-    if (e.lost) line.append(h('button', { textContent: 'Restore', onclick: () => api.call('restore', name, e.logId).then(() => showLog(name, el)) }))
+    if (e.lost) line.append(h('button', { textContent: 'Restore', onclick: () => api.call('restore', name, e.logId).then(() => showLog(name, el)).catch(e => alert(e.message)) }))
     el.append(line)
   }
 }
@@ -74,7 +77,7 @@ function render(projects) {
           h('button', { textContent: 'Open', onclick: () => api.call('open', p.name, t.table) }), ' ',
           h('button', { textContent: `→ .${other}`, onclick: () => api.call('format', p.name, t.table, other).catch(e => alert(e.message)) })))
       for (const msg of [t.reason, ...t.warnings, ...t.rejected].filter(Boolean)) row.append(h('div', { className: 'why', textContent: msg }))
-      if (t.needsConfirm) row.append(h('div', { className: 'why' }, h('button', { textContent: 'Confirm deletes', onclick: () => api.call('confirm', p.name, t.table) })))
+      if (t.needsConfirm) row.append(h('div', { className: 'why' }, h('button', { textContent: 'Confirm and sync', onclick: () => api.call('confirm', p.name, t.table).catch(e => alert(e.message)) })))
       list.append(row)
     }
     const log = h('details', { className: 'log', open: openLog === p.name }, h('summary', { textContent: 'Activity' }))
