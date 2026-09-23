@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Backend Sync</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<style>
+  :root { color-scheme: light dark; font: 13px -apple-system, system-ui, sans-serif; }
+  body { margin: 0; padding: 12px; }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  h2 { font-size: 13px; margin: 16px 0 4px; }
+  .t { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 6px 0; border-top: 1px solid #8884; }
+  .why { grid-column: 1 / -1; color: #c60; }
+  .muted { color: #888; }
+  button, input { font: inherit; }
+  form { display: grid; gap: 6px; margin-top: 8px; }
+  details { margin-top: 8px; }
+  .log div { padding: 3px 0; }
+</style>
+</head>
+<body>
+<header>
+  <strong>Backend Sync</strong>
+  <span><button id="reveal">Open folder</button> <button id="sync">Sync now</button></span>
+</header>
+<div id="list"></div>
+<details>
+  <summary>Add project</summary>
+  <form id="add">
+    <input name="name" placeholder="Folder name, e.g. QWeb" required>
+    <input name="url" placeholder="https://xyz.supabase.co" required>
+    <input name="key" type="password" placeholder="service_role or secret key" required>
+    <button>Add and pull every table</button>
+    <span id="err" class="why"></span>
+  </form>
+</details>
+<script>
+const $ = s => document.querySelector(s)
+const h = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e }
+const ICON = { ok: '✓', syncing: '↻', waiting: '⏸', attention: '⚠', paused: '⚠', offline: '⌁' }
+let openLog = null
+
+function describe(e) {
+  const when = new Date(e.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  if (e.type === 'sync') return `${when} · ${e.table}: ${e.pushed} up, ${e.pulled} down`
+  if (e.type === 'restore') return `${when} · ${e.table}: restored an overwritten version`
+  return `${when} · ${e.table} row ${e.id}: kept the ${e.kept === 'local' ? 'file' : 'Supabase'} version${e.reason ? ` (${e.reason})` : ''}`
+}
+
+async function showLog(name, el) {
+  const entries = await api.call('log', name)
+  el.querySelectorAll('div').forEach(d => d.remove())
+  if (!entries.length) el.append(h('div', { className: 'muted', textContent: 'Nothing yet.' }))
+  for (const e of entries) {
+    const line = h('div', { textContent: describe(e) + ' ' })
+    if (e.lost) line.append(h('button', { textContent: 'Restore', onclick: () => api.call('restore', name, e.logId).then(() => showLog(name, el)) }))
+    el.append(line)
+  }
+}
+
+function render(projects) {
+  const list = $('#list')
+  list.replaceChildren()
+  if (!projects.length) list.append(h('p', { className: 'muted', textContent: 'No projects yet. Add one below. Tip: drag the Backend folder into Finder’s sidebar.' }))
+  for (const p of projects) {
+    list.append(h('h2', { textContent: p.name }))
+    if (p.offline) list.append(h('div', { className: 'why', textContent: `Can't reach Supabase: ${p.offline}` }))
+    for (const t of p.tables) {
+      const other = t.format === 'xlsx' ? 'json' : 'xlsx'
+      const row = h('div', { className: 't' },
+        h('span', { textContent: `${ICON[t.state] ?? ''} ${t.table}.${t.format}${t.pending ? ` · ${t.pending} waiting` : ''}` }),
+        h('span', {},
+          h('button', { textContent: 'Open', onclick: () => api.call('open', p.name, t.table) }), ' ',
+          h('button', { textContent: `→ .${other}`, onclick: () => api.call('format', p.name, t.table, other).catch(e => alert(e.message)) })))
+      for (const msg of [t.reason, ...t.warnings, ...t.rejected].filter(Boolean)) row.append(h('div', { className: 'why', textContent: msg }))
+      if (t.needsConfirm) row.append(h('div', { className: 'why' }, h('button', { textContent: 'Confirm deletes', onclick: () => api.call('confirm', p.name, t.table) })))
+      list.append(row)
+    }
+    const log = h('details', { className: 'log', open: openLog === p.name }, h('summary', { textContent: 'Activity' }))
+    log.addEventListener('toggle', () => { openLog = log.open ? p.name : null; if (log.open) showLog(p.name, log) })
+    list.append(log)
+  }
+}
+
+api.onState(render)
+$('#sync').onclick = () => api.call('sync')
+$('#reveal').onclick = () => api.call('reveal')
+$('#add').onsubmit = async e => {
+  e.preventDefault()
+  $('#err').textContent = ''
+  try {
+    await api.call('add', Object.fromEntries(new FormData(e.target)))
+    e.target.reset()
+  } catch (err) {
+    $('#err').textContent = err.message.replace(/^Error invoking remote method 'add': (Error: )?/, '')
+  }
+}
+</script>
+</body>
+</html>
