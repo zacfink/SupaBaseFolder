@@ -9,6 +9,7 @@ const SYNC_EVERY_MS = 30_000 // backstop: offline reconnects and tables missing 
 const projects = new Map()
 const broken = new Map() // project name -> why it couldn't start
 let tray, win
+const WIDTH = 360
 
 // Keys are encrypted with safeStorage (its key lives in the macOS Keychain) and kept out of ~/Backend.
 const keysFile = () => path.join(app.getPath('userData'), 'keys.json')
@@ -27,18 +28,18 @@ const state = () => [
 
 function title(list) {
   const tables = list.flatMap(p => p.tables)
-  if (tables.some(t => t.state === 'paused' || t.state === 'attention')) return '⚠'
-  if (tables.some(t => t.state === 'syncing')) return '↻'
+  const need = tables.filter(t => t.state === 'paused' || t.state === 'attention').length
+  if (need) return `${need} to check`
   if (list.some(p => p.offline) || tables.some(t => t.state === 'offline')) {
     const waiting = tables.reduce((n, t) => n + (t.state === 'offline' ? t.pending : 0), 0)
-    return waiting ? `Offline, ${waiting} changes waiting` : 'Offline'
+    return waiting ? `Offline · ${waiting} waiting` : 'Offline'
   }
-  return '✓'
+  return ''
 }
 
 function refresh() {
   const s = state()
-  tray?.setTitle(`⇅ ${title(s)}`)
+  tray?.setTitle(title(s), { fontType: 'monospacedDigit' })
   win?.webContents.send('state', s)
 }
 
@@ -76,6 +77,7 @@ ipcMain.handle('format', (_, name, table, format) => {
 })
 ipcMain.handle('log', (_, name) => get(name).readLog())
 ipcMain.handle('reveal', () => shell.openPath(ROOT))
+ipcMain.handle('resize', (_, height) => win.setContentSize(WIDTH, Math.min(Math.max(Math.round(height) || 0, 120), 640)))
 ipcMain.handle('add', async (_, { name, url, key }) => {
   name = name.trim()
   key = key.trim()
@@ -95,21 +97,29 @@ else app.whenReady().then(() => {
   app.dock?.hide()
   const firstRun = !fs.existsSync(ROOT)
   fs.mkdirSync(ROOT, { recursive: true })
-  tray = new Tray(nativeImage.createEmpty())
+  tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'assets', 'trayTemplate.png')))
+  tray.setToolTip('Backend Sync')
   win = new BrowserWindow({
-    width: 380, height: 560, show: false, frame: false, resizable: false, skipTaskbar: true,
+    width: WIDTH, height: 200, show: false, frame: false, resizable: false, skipTaskbar: true,
+    transparent: true, vibrancy: 'popover', visualEffectState: 'active',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   })
   win.loadFile('window.html')
   win.on('blur', () => win.hide())
+  win.webContents.on('before-input-event', (_, input) => input.key === 'Escape' && win.hide())
   tray.on('click', () => {
     if (win.isVisible()) return win.hide()
     const b = tray.getBounds()
-    win.setPosition(Math.round(b.x + b.width / 2 - 190), b.y + b.height + 4)
+    win.setPosition(Math.round(b.x + b.width / 2 - WIDTH / 2), b.y + b.height + 4)
     win.show()
     refresh()
   })
-  tray.on('right-click', () => tray.popUpContextMenu(Menu.buildFromTemplate([{ label: 'Quit Backend Sync', click: () => app.quit() }])))
+  tray.on('right-click', () => tray.popUpContextMenu(Menu.buildFromTemplate([
+    { label: 'Sync now', click: () => projects.forEach(p => p.syncAll()) },
+    { label: 'Open Backend folder', click: () => shell.openPath(ROOT) },
+    { type: 'separator' },
+    { label: 'Quit Backend Sync', accelerator: 'Command+Q', click: () => app.quit() },
+  ])))
   for (const name of Project.list()) startProject(name)
   if (firstRun) shell.openPath(ROOT) // no API adds a sidebar favourite; the window tells Zac to drag it in
   setInterval(() => projects.forEach(p => p.syncAll()), SYNC_EVERY_MS)

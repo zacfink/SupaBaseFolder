@@ -5,40 +5,140 @@
 <title>Backend Sync</title>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
 <style>
-  :root { color-scheme: light dark; font: 13px -apple-system, system-ui, sans-serif; }
-  body { margin: 0; padding: 12px; }
-  header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-  h2 { font-size: 13px; margin: 16px 0 4px; }
-  .t { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 6px 0; border-top: 1px solid #8884; }
-  .why { grid-column: 1 / -1; color: #c60; }
-  .muted { color: #888; }
-  button, input { font: inherit; }
-  form { display: grid; gap: 6px; margin-top: 8px; }
-  details { margin-top: 8px; }
-  .log div { padding: 3px 0; }
+  :root {
+    color-scheme: light dark;
+    --fg: rgb(0 0 0 / .86); --muted: rgb(0 0 0 / .6); --line: rgb(0 0 0 / .1);
+    --fill: rgb(0 0 0 / .06); --fill-hover: rgb(0 0 0 / .1); --field: rgb(255 255 255 / .7);
+    --accent: #0a64d8; --on-accent: #fff;
+    --ok: #1a8a4a; --warn: #a65400; --bad: #c42b1c;
+    font: 13px/1.4 -apple-system, system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg: rgb(255 255 255 / .88); --muted: rgb(255 255 255 / .6); --line: rgb(255 255 255 / .1);
+      --fill: rgb(255 255 255 / .08); --fill-hover: rgb(255 255 255 / .14); --field: rgb(0 0 0 / .25);
+      --accent: #3b8cff; --on-accent-bg: #1f6fe5; --ok: #3ccf6e; --warn: #ffb340; --bad: #ff6b60;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: transparent; color: var(--fg); }
+  body { padding: 10px 12px 12px; user-select: none; -webkit-user-select: none; }
+  ::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+  button, input { font: inherit; color: inherit; }
+  svg { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+
+  button {
+    display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px;
+    border: 0; border-radius: 6px; background: var(--fill); cursor: default;
+  }
+  button:hover { background: var(--fill-hover); }
+  button:disabled { opacity: .5; }
+  button.primary { background: var(--on-accent-bg, var(--accent)); color: var(--on-accent); font-weight: 500; }
+  button.primary:hover { background: color-mix(in srgb, var(--on-accent-bg, var(--accent)) 88%, #000); }
+  button.quiet { background: none; color: var(--muted); padding: 0 6px; }
+  button.quiet:hover { background: var(--fill); color: var(--fg); }
+  button.icon { width: 26px; padding: 0; justify-content: center; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  header { display: flex; align-items: center; gap: 6px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  header .title { flex: 1; min-width: 0; }
+  header strong { display: block; font-weight: 600; }
+  #overall { color: var(--muted); font-size: 12px; }
+
+  h2 { display: flex; align-items: center; gap: 6px; margin: 14px 0 4px; font-size: 11px; font-weight: 600; letter-spacing: .02em; color: var(--muted); }
+  .row { display: grid; grid-template-columns: 16px 1fr auto; align-items: center; gap: 0 8px; padding: 5px 4px; margin: 0 -4px; border-radius: 6px; }
+  .row:hover { background: var(--fill); }
+  .row .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .ext { color: var(--muted); }
+  .row .meta { color: var(--muted); font-size: 12px; }
+  .row .actions { display: flex; gap: 2px; }
+  .row .swap { visibility: hidden; }
+  .row:hover .swap, .row .swap:focus-visible { visibility: visible; }
+  .note { grid-column: 2 / -1; font-size: 12px; margin-top: 2px; }
+  .note button { margin-top: 4px; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); } .dim { color: var(--muted); }
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+  details > summary { list-style: none; display: inline-flex; align-items: center; gap: 4px; margin-top: 2px; padding: 2px 6px 2px 2px; border-radius: 6px; color: var(--muted); font-size: 12px; }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary:hover { background: var(--fill); color: var(--fg); }
+  details > summary svg { width: 12px; height: 12px; transition: transform .15s ease-out; }
+  details[open] > summary svg { transform: rotate(90deg); }
+  .log { font-size: 12px; }
+  .log .entry { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 0 3px 16px; color: var(--muted); }
+  .log .entry button { height: 20px; font-size: 12px; }
+
+  #setup { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+  #setup h3 { margin: 10px 0 2px; font-size: 13px; font-weight: 600; }
+  #setup p { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+  form { display: grid; gap: 10px; }
+  label { display: grid; gap: 3px; font-size: 12px; font-weight: 500; }
+  label small { font-weight: 400; color: var(--muted); }
+  input {
+    height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--field);
+    user-select: text; -webkit-user-select: text;
+  }
+  input::placeholder { color: var(--muted); }
+  input:focus-visible { outline-offset: 0; border-color: transparent; }
+  #err:empty { display: none; }
+  #err { margin: 0; font-size: 12px; }
+  form .primary { height: 28px; justify-content: center; }
 </style>
 </head>
 <body>
 <header>
-  <strong>Backend Sync</strong>
-  <span><button id="reveal">Open folder</button> <button id="sync">Sync now</button></span>
+  <div class="title"><strong>Backend Sync</strong><span id="overall"></span></div>
+  <button id="reveal" class="icon" title="Open the Backend folder" aria-label="Open the Backend folder"><svg><use href="#i-folder"/></svg></button>
+  <button id="sync" class="icon" title="Sync now" aria-label="Sync now"><svg><use href="#i-sync"/></svg></button>
 </header>
-<div id="list"></div>
-<details>
-  <summary>Add project</summary>
+<main id="list"></main>
+<details id="setup">
+  <summary><svg><use href="#i-chev"/></svg>Add a project</summary>
+  <h3>Connect a Supabase project</h3>
+  <p>Every table becomes a file in ~/Backend/&lt;folder&gt;, kept in sync both ways.</p>
   <form id="add">
-    <input name="name" placeholder="Folder name, e.g. QWeb" required>
-    <input name="url" placeholder="https://xyz.supabase.co" required>
-    <input name="key" type="password" placeholder="sb_secret_… key" required>
-    <span class="muted">Supabase → Project Settings → API Keys → Secret keys. Use the copy icon; selecting the text copies the •••• mask.</span>
-    <button>Add and pull every table</button>
-    <span id="err" class="why"></span>
+    <label>Folder name
+      <input name="name" placeholder="QWeb" required autocomplete="off">
+    </label>
+    <label>Project URL
+      <input name="url" placeholder="https://abcd.supabase.co" required autocomplete="off" spellcheck="false">
+      <small>On the project's page in Supabase, under Connect or Project Settings.</small>
+    </label>
+    <label>Secret key
+      <input name="key" type="password" placeholder="sb_secret_…" required autocomplete="off">
+      <small>Project Settings → API Keys → Secret keys. Use the copy icon: selecting the text copies the •••• mask. The publishable key won't work.</small>
+    </label>
+    <p id="err" class="bad" role="alert"></p>
+    <button class="primary" id="go">Connect and pull tables</button>
   </form>
 </details>
+
+<svg style="display:none">
+  <symbol id="i-ok" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.25"/><path d="m5.5 8.2 1.7 1.7 3.3-3.6"/></symbol>
+  <symbol id="i-sync" viewBox="0 0 16 16"><path d="M13.25 8a5.25 5.25 0 0 1-9.4 3.2M2.75 8a5.25 5.25 0 0 1 9.4-3.2"/><path d="M12.4 2.2v2.8H9.6M3.6 13.8V11h2.8"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.25"/><path d="M6.6 5.8v4.4M9.4 5.8v4.4"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 16 16"><path d="M8 2.2 14.2 13H1.8Z"/><path d="M8 6.4v3M8 11.2v.1"/></symbol>
+  <symbol id="i-offline" viewBox="0 0 16 16"><path d="M4.6 12.5h7a2.6 2.6 0 0 0 .5-5.15 4.2 4.2 0 0 0-6.9-2.2M3.9 6.9A2.9 2.9 0 0 0 4.6 12.5M2.2 2.2l11.6 11.6"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 16 16"><path d="M1.9 4.2c0-.7.5-1.2 1.2-1.2h3l1.5 1.6h5.3c.7 0 1.2.5 1.2 1.2v6.1c0 .7-.5 1.2-1.2 1.2H3.1c-.7 0-1.2-.5-1.2-1.2Z"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 16 16"><path d="m6 3.5 4.5 4.5L6 12.5"/></symbol>
+</svg>
+
 <script>
 const $ = s => document.querySelector(s)
 const h = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e }
-const ICON = { ok: '✓', syncing: '↻', waiting: '⏸', attention: '⚠', paused: '⚠', offline: '⌁' }
+const icon = (id, cls = '') => {
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  s.setAttribute('class', cls)
+  s.setAttribute('aria-hidden', 'true')
+  s.innerHTML = `<use href="#i-${id}"/>`
+  return s
+}
+const STATE = {
+  ok: ['ok', 'ok', 'Synced'], syncing: ['sync', 'dim spin', 'Syncing'], waiting: ['pause', 'dim', 'Waiting'],
+  attention: ['alert', 'warn', 'Needs attention'], paused: ['alert', 'warn', 'Paused'], offline: ['offline', 'dim', 'Offline'],
+}
 let openLog = null
 
 function describe(e) {
@@ -52,51 +152,83 @@ function describe(e) {
 
 async function showLog(name, el) {
   const entries = await api.call('log', name)
-  el.querySelectorAll('div').forEach(d => d.remove())
-  if (!entries.length) el.append(h('div', { className: 'muted', textContent: 'Nothing yet.' }))
+  el.querySelectorAll('.entry').forEach(d => d.remove())
+  if (!entries.length) el.append(h('div', { className: 'entry', textContent: 'Nothing yet.' }))
   for (const e of entries) {
-    const line = h('div', { textContent: describe(e) + ' ' })
+    const line = h('div', { className: 'entry' }, h('span', { textContent: describe(e) }))
     if (e.lost) line.append(h('button', { textContent: 'Restore', onclick: () => api.call('restore', name, e.logId).then(() => showLog(name, el)).catch(e => alert(e.message)) }))
     el.append(line)
   }
+  fit()
+}
+
+function overall(projects) {
+  const tables = projects.flatMap(p => p.tables)
+  if (!projects.length) return 'Not connected yet'
+  const need = tables.filter(t => t.state === 'attention' || t.state === 'paused').length
+  if (need) return `${need} ${need === 1 ? 'table needs' : 'tables need'} you`
+  if (projects.some(p => p.offline) || tables.some(t => t.state === 'offline')) return 'Offline, changes will wait'
+  if (tables.some(t => t.state === 'syncing')) return 'Syncing…'
+  return `All synced · ${tables.length} ${tables.length === 1 ? 'table' : 'tables'}`
 }
 
 function render(projects) {
+  $('#overall').textContent = overall(projects)
+  if (!projects.length) $('#setup').open = true
   const list = $('#list')
   list.replaceChildren()
-  if (!projects.length) list.append(h('p', { className: 'muted', textContent: 'No projects yet. Add one below. Tip: drag the Backend folder into Finder’s sidebar.' }))
   for (const p of projects) {
     list.append(h('h2', { textContent: p.name }))
-    if (p.offline) list.append(h('div', { className: 'why', textContent: `Can't reach Supabase: ${p.offline}` }))
-    if (p.watchError) list.append(h('div', { className: 'why', textContent: `File watching stopped: ${p.watchError}` }))
+    if (p.offline) list.append(h('div', { className: 'row' }, icon('offline', 'dim'), h('span', { className: 'note bad', textContent: `Can't reach Supabase: ${p.offline}` })))
+    if (p.watchError) list.append(h('div', { className: 'row' }, icon('alert', 'bad'), h('span', { className: 'note bad', textContent: `File watching stopped: ${p.watchError}` })))
     for (const t of p.tables) {
+      const [id, cls, label] = STATE[t.state] ?? STATE.syncing
       const other = t.format === 'xlsx' ? 'json' : 'xlsx'
-      const row = h('div', { className: 't' },
-        h('span', { textContent: `${ICON[t.state] ?? ''} ${t.table}.${t.format}${t.pending ? ` · ${t.pending} waiting` : ''}` }),
-        h('span', {},
-          h('button', { textContent: 'Open', onclick: () => api.call('open', p.name, t.table) }), ' ',
-          h('button', { textContent: `→ .${other}`, onclick: () => api.call('format', p.name, t.table, other).catch(e => alert(e.message)) })))
-      for (const msg of [t.reason, ...t.warnings, ...t.rejected].filter(Boolean)) row.append(h('div', { className: 'why', textContent: msg }))
-      if (t.needsConfirm) row.append(h('div', { className: 'why' }, h('button', { textContent: 'Confirm and sync', onclick: () => api.call('confirm', p.name, t.table).catch(e => alert(e.message)) })))
+      const st = icon(id, cls)
+      st.setAttribute('aria-hidden', 'false')
+      st.setAttribute('role', 'img')
+      st.setAttribute('aria-label', label)
+      const row = h('div', { className: 'row', title: label },
+        st,
+        h('span', { className: 'name' }, t.table, h('span', { className: 'ext', textContent: `.${t.format}` }),
+          ...(t.pending ? [h('span', { className: 'meta', textContent: ` · ${t.pending} waiting` })] : [])),
+        h('span', { className: 'actions' },
+          h('button', { className: 'quiet swap', textContent: `Use .${other}`, title: `Switch this table to a .${other} file`, onclick: () => api.call('format', p.name, t.table, other).catch(e => alert(e.message)) }),
+          h('button', { textContent: 'Open', onclick: () => api.call('open', p.name, t.table) })))
+      for (const msg of [t.reason, ...t.warnings, ...t.rejected].filter(Boolean)) row.append(h('div', { className: 'note warn', textContent: msg }))
+      if (t.needsConfirm) row.append(h('div', { className: 'note' }, h('button', { className: 'primary', textContent: 'Confirm and sync', onclick: () => api.call('confirm', p.name, t.table).catch(e => alert(e.message)) })))
       list.append(row)
     }
-    const log = h('details', { className: 'log', open: openLog === p.name }, h('summary', { textContent: 'Activity' }))
-    log.addEventListener('toggle', () => { openLog = log.open ? p.name : null; if (log.open) showLog(p.name, log) })
+    const log = h('details', { className: 'log', open: openLog === p.name }, h('summary', {}, icon('chev'), 'Activity'))
+    log.addEventListener('toggle', () => { openLog = log.open ? p.name : null; log.open ? showLog(p.name, log) : fit() })
     list.append(log)
   }
+  fit()
 }
 
+// Size the window to its content so there's no empty panel below the list.
+const fit = () => requestAnimationFrame(() => api.call('resize', Math.ceil(document.body.scrollHeight)))
+
 api.onState(render)
+$('#setup').addEventListener('toggle', fit)
 $('#sync').onclick = () => api.call('sync')
 $('#reveal').onclick = () => api.call('reveal')
 $('#add').onsubmit = async e => {
   e.preventDefault()
+  const go = $('#go')
   $('#err').textContent = ''
+  go.disabled = true
+  go.textContent = 'Connecting…'
   try {
     await api.call('add', Object.fromEntries(new FormData(e.target)))
     e.target.reset()
+    $('#setup').open = false
   } catch (err) {
     $('#err').textContent = err.message.replace(/^Error invoking remote method 'add': (Error: )?/, '')
+  } finally {
+    go.disabled = false
+    go.textContent = 'Connect and pull tables'
+    fit()
   }
 }
 </script>
