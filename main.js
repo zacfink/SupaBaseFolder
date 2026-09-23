@@ -55,16 +55,25 @@ const get = name => {
   if (!p) throw new Error(`No project called ${name}`)
   return p
 }
+// Renderer-supplied name/table/format all get checked here before they reach a path or shell call.
+const getTable = (name, table) => {
+  const p = get(name)
+  if (!p.summary().tables.some(t => t.table === table)) throw new Error(`No table called ${table} in ${name}`)
+  return p
+}
 
 ipcMain.handle('sync', () => Promise.all([...projects.values()].map(p => p.syncAll())))
 ipcMain.handle('open', (_, name, table) => {
-  const file = get(name).file(table)
+  const file = getTable(name, table).file(table)
   if (file.endsWith('.json')) execFile('open', ['-a', 'Visual Studio Code', file], err => err && shell.openPath(file))
   else shell.openPath(file)
 })
-ipcMain.handle('confirm', (_, name, table) => get(name).sync(table, { confirmDeletes: true }))
+ipcMain.handle('confirm', (_, name, table) => getTable(name, table).sync(table, { confirmDeletes: true }))
 ipcMain.handle('restore', (_, name, logId) => get(name).restore(logId))
-ipcMain.handle('format', (_, name, table, format) => get(name).switchFormat(table, format))
+ipcMain.handle('format', (_, name, table, format) => {
+  if (format !== 'xlsx' && format !== 'json') throw new Error(`Unknown format ${format}`)
+  return getTable(name, table).switchFormat(table, format)
+})
 ipcMain.handle('log', (_, name) => get(name).readLog())
 ipcMain.handle('reveal', () => shell.openPath(ROOT))
 ipcMain.handle('add', async (_, { name, url, key }) => {
@@ -85,7 +94,7 @@ app.whenReady().then(() => {
   tray = new Tray(nativeImage.createEmpty())
   win = new BrowserWindow({
     width: 380, height: 560, show: false, frame: false, resizable: false, skipTaskbar: true,
-    webPreferences: { preload: path.join(__dirname, 'preload.js') },
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   })
   win.loadFile('window.html')
   win.on('blur', () => win.hide())

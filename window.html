@@ -65,6 +65,7 @@ function render(projects) {
   for (const p of projects) {
     list.append(h('h2', { textContent: p.name }))
     if (p.offline) list.append(h('div', { className: 'why', textContent: `Can't reach Supabase: ${p.offline}` }))
+    if (p.watchError) list.append(h('div', { className: 'why', textContent: `File watching stopped: ${p.watchError}` }))
     for (const t of p.tables) {
       const other = t.format === 'xlsx' ? 'json' : 'xlsx'
       const row = h('div', { className: 't' },
