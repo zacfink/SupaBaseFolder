@@ -1,4 +1,4 @@
-# Backend Sync v2: control all of Supabase from ~/Backend
+# SupaBaseFolder v2 (formerly Backend Sync): control all of Supabase from ~/Backend
 
 Date: 2026-09-23 · Status: draft for Zac's review · Builds on `2026-09-22-backend-sync-design.md`
 

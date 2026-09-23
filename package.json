@@ -6,7 +6,7 @@
   "scripts": {
     "test": "node --test",
     "start": "electron .",
-    "package": "electron-packager . \"Backend Sync\" --platform=darwin --out=dist --overwrite --ignore=\"^/(dist|test|docs|scripts|\\\\.[^/]+)\""
+    "package": "electron-packager . \"SupaBaseFolder\" --platform=darwin --out=dist --overwrite --ignore=\"^/(dist|test|docs|scripts|\\\\.[^/]+)\""
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.0",

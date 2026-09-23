@@ -98,7 +98,7 @@ else app.whenReady().then(() => {
   const firstRun = !fs.existsSync(ROOT)
   fs.mkdirSync(ROOT, { recursive: true })
   tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'assets', 'trayTemplate.png')))
-  tray.setToolTip('Backend Sync')
+  tray.setToolTip('SupaBaseFolder')
   win = new BrowserWindow({
     width: WIDTH, height: 200, show: false, frame: false, resizable: false, skipTaskbar: true,
     transparent: true, vibrancy: 'popover', visualEffectState: 'active',
@@ -118,7 +118,7 @@ else app.whenReady().then(() => {
     { label: 'Sync now', click: () => projects.forEach(p => p.syncAll()) },
     { label: 'Open Backend folder', click: () => shell.openPath(ROOT) },
     { type: 'separator' },
-    { label: 'Quit Backend Sync', accelerator: 'Command+Q', click: () => app.quit() },
+    { label: 'Quit SupaBaseFolder', accelerator: 'Command+Q', click: () => app.quit() },
   ])))
   for (const name of Project.list()) startProject(name)
   if (firstRun) shell.openPath(ROOT) // no API adds a sidebar favourite; the window tells Zac to drag it in
