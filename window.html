@@ -85,6 +85,14 @@
   #err:empty { display: none; }
   #err { margin: 0; font-size: 12px; }
   form .primary { height: 28px; justify-content: center; }
+  #remove { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+  #remove h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
+  #remove p { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+  #remove label.check { display: flex; align-items: center; gap: 6px; font-weight: 400; }
+  #remove input[type=checkbox] { height: auto; }
+  #remove .danger { background: var(--bad); color: #fff; font-weight: 500; justify-content: center; height: 28px; }
+  #remove .danger:disabled { opacity: .4; }
+  #remove .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 </style>
 </head>
 <body>
@@ -114,6 +122,22 @@
     <button class="primary" id="go">Connect and pull tables</button>
   </form>
 </details>
+
+<section id="remove" hidden>
+  <h3>Disconnect <span id="rm-name"></span></h3>
+  <p>Syncing stops and the saved key is forgotten. Nothing changes in Supabase. The table files stay in ~/Backend as plain files unless you tick the box below.</p>
+  <form id="rm">
+    <label class="check"><input type="checkbox" name="trash"> Also move the folder to the Trash</label>
+    <label>Type <strong id="rm-hint"></strong> to confirm
+      <input name="typed" required autocomplete="off" spellcheck="false">
+    </label>
+    <p id="rm-err" class="bad" role="alert"></p>
+    <div class="buttons">
+      <button type="button" id="rm-cancel">Cancel</button>
+      <button class="danger" id="rm-go" disabled>Disconnect</button>
+    </div>
+  </form>
+</section>
 
 <svg style="display:none">
   <symbol id="i-ok" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.25"/><path d="m5.5 8.2 1.7 1.7 3.3-3.6"/></symbol>
@@ -210,6 +234,31 @@ function render(projects) {
 const fit = () => requestAnimationFrame(() => api.call('resize', Math.ceil(document.body.scrollHeight)))
 
 api.onState(render)
+let removing = null
+const closeRemove = () => { removing = null; $('#remove').hidden = true; $('#rm').reset(); $('#rm-err').textContent = ''; fit() }
+api.onRemove(name => {
+  removing = name
+  $('#rm').reset()
+  $('#rm-name').textContent = $('#rm-hint').textContent = name
+  $('#rm-go').disabled = true
+  $('#rm-err').textContent = ''
+  $('#remove').hidden = false
+  $('#setup').open = false
+  $('#rm').typed.focus()
+  fit()
+})
+$('#rm').typed.oninput = e => { $('#rm-go').disabled = e.target.value !== removing }
+$('#rm-cancel').onclick = closeRemove
+$('#rm').onsubmit = async e => {
+  e.preventDefault()
+  try {
+    await api.call('remove', removing, e.target.typed.value, e.target.trash.checked)
+    closeRemove()
+  } catch (err) {
+    $('#rm-err').textContent = err.message.replace(/^Error invoking remote method 'remove': (Error: )?/, '')
+    fit()
+  }
+}
 $('#setup').addEventListener('toggle', fit)
 $('#sync').onclick = () => api.call('sync')
 $('#reveal').onclick = () => api.call('reveal')

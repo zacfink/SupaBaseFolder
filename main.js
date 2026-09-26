@@ -20,6 +20,11 @@ function saveKey(name, key) {
   keys[name] = safeStorage.encryptString(key).toString('base64')
   fs.writeFileSync(keysFile(), JSON.stringify(keys), { mode: 0o600 })
 }
+function forgetKey(name) {
+  const keys = loadKeys()
+  delete keys[name]
+  fs.writeFileSync(keysFile(), JSON.stringify(keys), { mode: 0o600 })
+}
 
 const state = () => [
   ...[...projects.values()].map(p => p.summary()),
@@ -78,6 +83,20 @@ ipcMain.handle('format', (_, name, table, format) => {
 ipcMain.handle('log', (_, name) => get(name).readLog())
 ipcMain.handle('reveal', () => shell.openPath(ROOT))
 ipcMain.handle('resize', (_, height) => win.setContentSize(WIDTH, Math.min(Math.max(Math.round(height) || 0, 120), 640)))
+// Deliberately hard to reach: right-click menu only, and the renderer must send back the typed folder name.
+// Never touches Supabase. Unlink trashes .sync (files stay as plain files); delete trashes the whole folder.
+ipcMain.handle('remove', async (_, name, typed, trashFolder) => {
+  if (!projects.has(name) && !broken.has(name)) throw new Error(`No project called ${name}`)
+  if (typed !== name) throw new Error('Type the folder name exactly to confirm.')
+  const waiting = projects.get(name)?.summary().tables.reduce((n, t) => n + t.pending, 0)
+  if (waiting) throw new Error(`${waiting} ${waiting === 1 ? 'change hasn\'t' : 'changes haven\'t'} reached Supabase yet. Get back online and sync first.`)
+  projects.get(name)?.stop()
+  projects.delete(name)
+  broken.delete(name)
+  forgetKey(name)
+  await shell.trashItem(trashFolder ? path.join(ROOT, name) : path.join(ROOT, name, '.sync'))
+  refresh()
+})
 ipcMain.handle('add', async (_, { name, url, key }) => {
   name = name.trim()
   key = key.trim()
@@ -107,16 +126,20 @@ else app.whenReady().then(() => {
   win.loadFile('window.html')
   win.on('blur', () => win.hide())
   win.webContents.on('before-input-event', (_, input) => input.key === 'Escape' && win.hide())
-  tray.on('click', () => {
-    if (win.isVisible()) return win.hide()
+  const show = () => {
     const b = tray.getBounds()
     win.setPosition(Math.round(b.x + b.width / 2 - WIDTH / 2), b.y + b.height + 4)
     win.show()
     refresh()
-  })
+  }
+  tray.on('click', () => win.isVisible() ? win.hide() : show())
   tray.on('right-click', () => tray.popUpContextMenu(Menu.buildFromTemplate([
     { label: 'Sync now', click: () => projects.forEach(p => p.syncAll()) },
     { label: 'Open Backend folder', click: () => shell.openPath(ROOT) },
+    { type: 'separator' },
+    { label: 'Disconnect a project', enabled: state().length > 0, submenu: state().map(p => ({
+      label: `${p.name}…`, click: () => { show(); win.webContents.send('remove', p.name) },
+    })) },
     { type: 'separator' },
     { label: 'Quit SupaBaseFolder', accelerator: 'Command+Q', click: () => app.quit() },
   ])))
