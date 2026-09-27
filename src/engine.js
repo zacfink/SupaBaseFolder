@@ -49,6 +49,7 @@ class Project {
     this.pending = {}
     this.timers = {}
     this.watchError = null
+    this.stopped = false
   }
 
   start() {
@@ -60,25 +61,34 @@ class Project {
     return this.syncAll()
   }
 
+  // No new work starts after this. The promise settles once work already running has landed,
+  // so the caller can trash the folder without a late write recreating it.
   stop() {
+    this.stopped = true
     this.watcher?.close()
     this.remote?.close()
     Object.values(this.timers).forEach(clearTimeout)
+    return Promise.all([this.loading, ...Object.values(this.queues)])
   }
 
   async syncAll() {
+    if (this.stopped) return
+    const loading = this.loadSchema()
+    this.loading = loading.catch(() => {})
     try {
-      await this.loadSchema()
+      await loading
       this.offline = null
     } catch (e) {
       this.offline = e.message
     }
+    if (this.stopped) return
     this.onChange()
     if (this.schema) await Promise.all(Object.keys(this.schema).map(t => this.sync(t)))
   }
 
   async loadSchema() {
-    const all = await fetchSchema(this.config.url, this.key)
+    const all = await withTimeout(fetchSchema(this.config.url, this.key))
+    if (this.stopped) return
     this.schema = {}
     this.skipped = []
     for (const [table, def] of Object.entries(all)) {
@@ -117,7 +127,7 @@ class Project {
   }
 
   schedule(table) {
-    if (!this.schema?.[table]) return
+    if (this.stopped || !this.schema?.[table]) return
     clearTimeout(this.timers[table])
     this.timers[table] = setTimeout(() => this.sync(table), DEBOUNCE_MS)
   }
@@ -131,6 +141,7 @@ class Project {
 
   sync(table, opts) {
     const run = () => this.enqueue(table, () => {
+      if (this.stopped) return
       delete this.pending[table] // starting now: a fresh request queues its own run behind this one, it doesn't merge into this one
       return this.syncTable(table, opts).catch(e => this.set(table, { state: 'paused', reason: e.message }))
     })
