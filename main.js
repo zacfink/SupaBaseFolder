@@ -53,7 +53,12 @@ function startProject(name) {
   try { key = getKey(name) } catch { return broken.set(name, 'No saved key. Remove the folder and add the project again.') }
   const p = new Project(name, key, refresh)
   projects.set(name, p)
-  p.start()
+  // A corrupt config.json (crash mid-write) throws here; it shouldn't stop the other projects from starting.
+  try { p.start() } catch (e) {
+    p.stop()
+    projects.delete(name)
+    broken.set(name, `Couldn't start (${e.message}). Remove the folder and add the project again.`)
+  }
 }
 
 const get = name => {
@@ -88,21 +93,28 @@ ipcMain.handle('resize', (_, height) => win.setContentSize(WIDTH, Math.min(Math.
 ipcMain.handle('remove', async (_, name, typed, trashFolder) => {
   if (!projects.has(name) && !broken.has(name)) throw new Error(`No project called ${name}`)
   if (typed !== name) throw new Error('Type the folder name exactly to confirm.')
-  const waiting = projects.get(name)?.summary().tables.reduce((n, t) => n + t.pending, 0)
+  const tables = projects.get(name)?.summary().tables ?? []
+  // Only 'offline' counts local edits in pending ('waiting' counts pulls, and the file already has every local edit).
+  const waiting = tables.reduce((n, t) => n + (t.state === 'offline' ? t.pending : 0), 0)
   if (waiting) throw new Error(`${waiting} ${waiting === 1 ? 'change hasn\'t' : 'changes haven\'t'} reached Supabase yet. Get back online and sync first.`)
-  projects.get(name)?.stop()
+  // Paused and needs-attention tables can hold edits Supabase never got; trashing the folder would lose them.
+  const stuck = tables.filter(t => t.state === 'paused' || t.state === 'attention').map(t => t.table)
+  if (trashFolder && stuck.length) throw new Error(`${stuck.join(', ')} may have edits that never reached Supabase. Fix ${stuck.length === 1 ? 'it' : 'them'} first, or disconnect without moving the folder to the Trash.`)
+  await projects.get(name)?.stop() // let a sync already running land first, so it can't recreate the folder after it's trashed
   projects.delete(name)
   broken.delete(name)
   forgetKey(name)
-  await shell.trashItem(trashFolder ? path.join(ROOT, name) : path.join(ROOT, name, '.sync'))
-  refresh()
+  try { await shell.trashItem(trashFolder ? path.join(ROOT, name) : path.join(ROOT, name, '.sync')) }
+  finally { refresh() } // the project is gone either way; show that even if the Trash step failed
 })
 ipcMain.handle('add', async (_, { name, url, key }) => {
   name = name.trim()
   key = key.trim()
   url = url.trim()
   try { url = new URL(url).origin } catch {} // drop a pasted path like /rest/v1; a bad URL fails the check below
-  if (!/^\w[\w .-]*$/.test(name) || projects.has(name)) throw new Error('Pick a new folder name: letters, numbers, spaces, - . _')
+  if (!/^\w[\w .-]*$/.test(name)) throw new Error('Pick a folder name: letters, numbers, spaces, - . _')
+  // Checked on disk, not in the maps: ~/Backend is case-insensitive, so "qweb" would land in "QWeb", and a broken project is in neither.
+  if (fs.existsSync(path.join(ROOT, name, '.sync'))) throw new Error(`${name} is already connected. Pick a new folder name.`)
   if (!/^https:\/\/\S+$/.test(url)) throw new Error('The URL should look like https://xyz.supabase.co')
   await fetchSchema(url, key) // fails fast on a wrong URL or key
   Project.create(name, url)
