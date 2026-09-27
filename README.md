@@ -1,5 +1,7 @@
 # SupaBaseFolder
 
+[![tests](https://github.com/zacfink/SupaBaseFolder/actions/workflows/tests.yml/badge.svg)](https://github.com/zacfink/SupaBaseFolder/actions/workflows/tests.yml)
+
 Your Supabase tables as plain files on your Mac.
 
 SupaBaseFolder is a macOS menu bar app that turns each table in a Supabase project into a file in
