@@ -21,7 +21,9 @@
     }
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; background: transparent; color: var(--fg); }
+  html, body { margin: 0; background: transparent; color: var(--fg); overflow-x: hidden; }
+  /* Popover still scrolls past the 640px cap by trackpad; the bar itself just isn't drawn. */
+  ::-webkit-scrollbar { display: none; }
   body { padding: 10px 12px 12px; user-select: none; -webkit-user-select: none; }
   ::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
   button, input { font: inherit; color: inherit; }
