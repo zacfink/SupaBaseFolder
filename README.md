@@ -7,7 +7,7 @@ SupaBaseFolder is a macOS menu bar app that turns each table in a Supabase proje
 agent edit it, save, and the change reaches Supabase within seconds. When your site writes to Supabase,
 the file updates live.
 
-<img src="docs/screenshot.png" width="360" alt="The SupaBaseFolder menu bar window listing synced tables and their status">
+<img src="docs/menu-bar.png" width="360" alt="The SupaBaseFolder menu bar window listing synced tables and their status">
 
 ## What it does
 

@@ -1,4 +1,4 @@
-// Renders the menu bar window with sample data into docs/screenshot.png for the README.
+// Renders the menu bar window with sample data into docs/menu-bar.png for the README.
 // Run: npx electron scripts/screenshot.js
 const { app, BrowserWindow, ipcMain, nativeTheme } = require('electron')
 const fs = require('node:fs')
@@ -27,6 +27,6 @@ app.whenReady().then(async () => {
   win.webContents.send('state', sample)
   await new Promise(r => setTimeout(r, 800)) // let render + resize settle
   const image = await win.webContents.capturePage()
-  fs.writeFileSync(path.join(root, 'docs', 'screenshot.png'), image.toPNG())
+  fs.writeFileSync(path.join(root, 'docs', 'menu-bar.png'), image.toPNG())
   app.quit()
 })
