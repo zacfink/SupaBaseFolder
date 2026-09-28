@@ -20,15 +20,38 @@ the file updates live.
   the Activity list.
 - **Plays nicely with Excel.** It waits while a workbook is open, so it never writes over your unsaved
   edits.
-- **Its own table window.** Open (or right-click › Open a table) shows the table in a native-looking
-  window: typed cells, inline editing, a details panel for a row, search, add and delete. It edits the same
-  file, so it syncs like any other save. The gear picks the layout, and whether Open uses this window or
-  Excel / VS Code.
+- **Its own table window.** View and edit a table without Excel. See [The table window](#the-table-window).
 - **Offline-friendly.** Edits made offline queue up and sync on reconnect.
 - **Agent-friendly.** Each project folder has a generated `_schema.md` describing every table,
   column and rule, so an AI agent can read it and edit the files correctly.
 - **Keys stay in the Keychain.** Project keys are encrypted with macOS `safeStorage` and never written
   into `~/Backend`.
+
+## The table window
+
+<img src="docs/table-window.png" alt="The table window: a sidebar of projects and tables, the events table with typed cells, and a details panel for the selected row">
+
+Click **Open** next to a table in the menu bar window, or right-click the menu bar icon › **Open a table**.
+
+- Cells show by type: checkboxes for booleans, readable dates, JSON as `key value` tags. Required
+  columns are starred, and each header shows its Postgres type.
+- Double-click a cell to edit it. Click a checkbox in the selected row to flip it. Pick a row to open the
+  details panel, a form with a field for each column (dates, numbers, switches, a JSON editor), plus
+  Duplicate and Delete.
+- Add a row with **+ Row**, the "New row" line or ⌘N. It gets its `id` from Supabase when it syncs.
+  Delete the selected row with ⌫ (it asks first). ⌘F searches, ↑/↓ move between rows.
+- It writes the table's own file, so saves here sync exactly like saves from Excel, and they go through the
+  same checks and the same delete guard. Bad values get the same errors, like
+  `Row 3, capacity: "lots" is not a number`.
+- If the workbook is open in Excel, the window goes read-only until you close it there.
+- It follows the Mac's light or dark mode.
+
+**Settings** (the gear in the window's toolbar):
+
+| Setting | Options |
+|---|---|
+| Layout | Sidebar, with details when you pick a row (default) · Sidebar and table only · Table with details always shown, tables as tabs |
+| The menu bar's Open button opens | This window (default) · Excel for `.xlsx`, VS Code for `.json` |
 
 ## Run it
 
@@ -36,7 +59,8 @@ the file updates live.
 npm install
 npm start          # menu bar icon appears; click it, then "Add a project"
 npm test
-npm run package    # builds dist/SupaBaseFolder.app
+npm run package    # builds dist/SupaBaseFolder-darwin-arm64/SupaBaseFolder.app
+npx electron scripts/screenshot.js   # regenerates the README screenshots
 ```
 
 To add a project, you need its URL and a **secret** key (`sb_secret_…`), found in Supabase under

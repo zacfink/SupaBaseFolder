@@ -263,7 +263,7 @@ function renderTool() {
   tabs.hidden = settings.layout !== 'inspector' || !project()
   tabs.replaceChildren(...(project()?.tables ?? []).map(t => h('button', { className: t.table === cur.table ? 'on' : '', textContent: t.table, onclick: () => pick(cur.name, t.table) })))
   const t = tableState()
-  const words = { synced: 'Synced', syncing: 'Syncing…', offline: 'Offline', waiting: 'Waiting', paused: 'Paused', attention: 'Needs a look' }
+  const words = { ok: 'Synced', syncing: 'Syncing…', offline: 'Offline', waiting: 'Waiting', paused: 'Paused', attention: 'Needs a look' }
   $('#sync').replaceChildren(...(t ? [h('span', { className: 'st ' + t.state }), words[t.state] ?? t.state] : []))
   $('#ext').textContent = t?.format === 'json' ? 'Open in VS Code' : 'Open in Excel'
   $('#ext').disabled = !t
