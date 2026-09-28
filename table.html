@@ -1,0 +1,472 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>SupaBaseFolder</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!--
+  The table window: a native-feeling view of one synced table. It reads and writes the table's own file
+  (through main.js), so saves here sync exactly like saves from Excel or an editor.
+  Layout comes from settings: 'both' (sidebar, details open on click), 'sidebar' (no details), 'inspector'
+  (tables as tabs, details always shown).
+-->
+<style>
+  :root {
+    color-scheme: light dark;
+    --font: -apple-system, "SF Pro Text", system-ui, sans-serif; --mono: "SF Mono", ui-monospace, Menlo, monospace;
+    --bg: #ffffff; --ink: #1d1d1f; --muted: #6e6e73; --line: #e5e5ea; --alt: #f7f7f9; --accent: #0a64d6;
+    --chip: #eef0f4; --tool: rgb(250 250 252 / .92); --field: #ffffff; --warn: #c2410c; --bad: #d70015; --good: #28c840;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1e1e20; --ink: #f2f2f4; --muted: #98989f; --line: #343438; --alt: #232326; --chip: #2e2e33;
+      --tool: rgb(36 36 39 / .92); --field: #151517; --warn: #fb923c; --bad: #ff453a; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font: 13px/1.35 var(--font); color: var(--ink); background: transparent; display: flex; -webkit-font-smoothing: antialiased; user-select: none; }
+  button, input, textarea, select { font: inherit; color: inherit; }
+  [hidden] { display: none !important; }
+
+  /* sidebar sits on the window's vibrancy */
+  .side { width: 220px; flex: none; padding: 52px 10px 12px; overflow-y: auto; -webkit-app-region: drag; }
+  .side h6 { margin: 14px 8px 4px; font-size: 11px; font-weight: 600; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .side h6 .off { color: var(--warn); font-weight: 500; }
+  .side button { -webkit-app-region: no-drag; display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px; border: 0; background: none; border-radius: 6px; text-align: left; cursor: default; }
+  .side button.on { background: rgb(0 0 0 / .08); font-weight: 500; }
+  @media (prefers-color-scheme: dark) { .side button.on { background: rgb(255 255 255 / .1); } }
+  .side svg { width: 15px; height: 15px; color: var(--accent); flex: none; }
+  .st { width: 7px; height: 7px; border-radius: 50%; margin-left: auto; background: var(--good); flex: none; }
+  .st.syncing { background: var(--accent); } .st.offline, .st.waiting { background: #febc2e; } .st.paused, .st.attention { background: var(--bad); }
+
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+  .tool { height: 52px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 14px; background: var(--tool); border-bottom: .5px solid var(--line); -webkit-app-region: drag; }
+  .tool > * { -webkit-app-region: no-drag; }
+  body.no-side .tool { padding-left: 86px; } /* clear the traffic lights */
+  .tool h1 { font-size: 15px; font-weight: 600; margin: 0; white-space: nowrap; -webkit-app-region: drag; }
+  .tool h1 span { color: var(--muted); font-weight: 400; }
+  .sync { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); white-space: nowrap; -webkit-app-region: drag; }
+  .sp { flex: 1; -webkit-app-region: drag; align-self: stretch; }
+  .seg { display: inline-flex; background: var(--chip); border-radius: 7px; padding: 2px; }
+  .seg button { padding: 3px 10px; border-radius: 5px; font-size: 12px; color: var(--muted); border: 0; background: none; }
+  .seg button.on { background: var(--bg); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / .15); }
+  .search { width: 190px; height: 28px; border-radius: 7px; background: var(--chip); border: 0; padding: 0 10px; outline: none; }
+  .search:focus { box-shadow: 0 0 0 3px rgb(10 100 214 / .35); }
+  .btn { height: 28px; border-radius: 7px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px; font-weight: 500; background: var(--chip); border: 0; white-space: nowrap; }
+  .btn:hover { filter: brightness(.97); }
+  .btn.blue { background: var(--accent); color: #fff; }
+  .btn.icon { width: 28px; padding: 0; justify-content: center; }
+  .btn.danger { color: var(--bad); }
+  .btn:disabled { opacity: .45; }
+
+  .body { flex: 1; display: flex; min-height: 0; }
+  .wrap { flex: 1; overflow: auto; min-width: 0; }
+  table { border-collapse: separate; border-spacing: 0; min-width: 100%; font-variant-numeric: tabular-nums; }
+  th { position: sticky; top: 0; z-index: 1; background: var(--bg); text-align: left; font-weight: 500; font-size: 12px; color: var(--muted); padding: 7px 12px; border-bottom: .5px solid var(--line); white-space: nowrap; }
+  th em { font: 10px var(--mono); font-style: normal; opacity: .7; margin-left: 4px; }
+  th .req { color: var(--bad); margin-left: 2px; }
+  td { padding: 6px 12px; border-bottom: .5px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; height: 32px; cursor: default; }
+  tbody tr:nth-child(even) td { background: var(--alt); }
+  tr.sel td { background: var(--accent) !important; color: #fff; }
+  tr.sel .chip { background: rgb(255 255 255 / .2); color: #fff; } tr.sel .chip b, tr.sel td.id { color: rgb(255 255 255 / .75); }
+  td.id { color: var(--muted); font: 12px var(--mono); }
+  td.editing { padding: 0; box-shadow: inset 0 0 0 2px var(--accent); background: var(--field) !important; }
+  td.editing input { width: 100%; height: 100%; border: 0; outline: none; background: transparent; padding: 0 10px; color: var(--ink); }
+  .chk { width: 14px; height: 14px; border-radius: 4px; display: inline-grid; place-items: center; border: 1px solid #b7b7bd; vertical-align: -2px; }
+  .chk.on { background: var(--accent); border-color: var(--accent); }
+  tr.sel .chk { border-color: #fff; }
+  .chk.on::after { content: ""; width: 7px; height: 4px; border: solid #fff; border-width: 0 0 1.6px 1.6px; transform: rotate(-45deg) translate(1px, -1px); }
+  .chip { display: inline-block; font-size: 11.5px; background: var(--chip); border-radius: 5px; padding: 1px 7px; margin-right: 4px; }
+  .chip b { font-weight: 500; color: var(--muted); }
+  .nul { color: var(--muted); opacity: .6; }
+  tr.add td { color: var(--muted); }
+  .empty { padding: 60px 20px; text-align: center; color: var(--muted); }
+
+  .insp { width: 310px; flex: none; border-left: .5px solid var(--line); background: var(--alt); overflow-y: auto; padding: 16px; user-select: text; }
+  .insp header { display: flex; align-items: start; gap: 8px; margin-bottom: 14px; }
+  .insp h2 { font-size: 15px; margin: 0; flex: 1; overflow-wrap: anywhere; }
+  .insp .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--muted); margin-bottom: 4px; }
+  .field label em { font: 10px var(--mono); font-style: normal; }
+  .field input:not([type=checkbox]), .field textarea { width: 100%; background: var(--field); border: .5px solid var(--line); border-radius: 6px; padding: 6px 8px; outline: none; }
+  .field textarea { font: 12px/1.4 var(--mono); min-height: 90px; resize: vertical; }
+  .field input:focus, .field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgb(10 100 214 / .3); }
+  .field input:disabled { color: var(--muted); }
+  .field.bad textarea { border-color: var(--bad); }
+  .toggle { appearance: none; width: 32px; height: 19px; border-radius: 10px; background: #8e8e93; position: relative; margin: 0; transition: background .15s; }
+  .toggle::after { content: ""; position: absolute; width: 15px; height: 15px; border-radius: 50%; background: #fff; top: 2px; left: 2px; transition: left .15s; box-shadow: 0 1px 2px rgb(0 0 0 / .25); }
+  .toggle:checked { background: var(--good); } .toggle:checked::after { left: 15px; }
+  .actions { display: flex; gap: 8px; margin-top: 18px; } .actions .btn { flex: 1; justify-content: center; }
+
+  .foot { height: 28px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 14px; border-top: .5px solid var(--line); font-size: 11.5px; color: var(--muted); background: var(--tool); white-space: nowrap; overflow: hidden; }
+  .foot .msg { margin-left: auto; overflow: hidden; text-overflow: ellipsis; }
+  .foot .msg.bad { color: var(--bad); } .foot .msg.warn { color: var(--warn); }
+
+  .pop { position: fixed; top: 48px; right: 14px; width: 270px; background: var(--bg); border: .5px solid var(--line); border-radius: 10px; padding: 12px 14px; box-shadow: 0 12px 40px rgb(0 0 0 / .25); z-index: 5; }
+  .pop h3 { font-size: 12px; margin: 0 0 6px; color: var(--muted); font-weight: 600; }
+  .pop label { display: flex; gap: 8px; align-items: center; padding: 3px 0; }
+  .pop hr { border: 0; border-top: .5px solid var(--line); margin: 10px 0; }
+</style>
+</head>
+<body>
+<aside class="side" id="side"></aside>
+<section class="main">
+  <div class="tool">
+    <h1 id="title"></h1>
+    <div class="seg" id="tabs" hidden></div>
+    <span class="sync" id="sync"></span>
+    <div class="sp"></div>
+    <input class="search" id="q" placeholder="Search" spellcheck="false">
+    <button class="btn" id="ext">Open in Excel</button>
+    <button class="btn blue" id="add">+ Row</button>
+    <button class="btn icon" id="gear" title="Settings" aria-label="Settings">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 15.1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+  </div>
+  <div class="body">
+    <div class="wrap" id="wrap"></div>
+    <aside class="insp" id="insp" hidden></aside>
+  </div>
+  <div class="foot"><span id="count"></span><span id="path"></span><span class="msg" id="msg"></span></div>
+</section>
+<div class="pop" id="pop" hidden>
+  <h3>Layout</h3>
+  <label><input type="radio" name="layout" value="both"> Sidebar, details when you pick a row</label>
+  <label><input type="radio" name="layout" value="sidebar"> Sidebar and table only</label>
+  <label><input type="radio" name="layout" value="inspector"> Table with details always shown</label>
+  <hr>
+  <h3>The menu bar's Open button opens</h3>
+  <label><input type="radio" name="openWith" value="app"> This window</label>
+  <label><input type="radio" name="openWith" value="external"> Excel or VS Code</label>
+</div>
+
+<script>
+const $ = s => document.querySelector(s)
+const h = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e }
+const TABLE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10"/></svg>'
+const JSON_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H6a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2 2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h2M16 3h2a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2 2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-2"/></svg>'
+
+const params = new URLSearchParams(location.search)
+let cur = { name: params.get('name'), table: params.get('table') }
+let all = [], data = null, settings = { layout: 'both', openWith: 'app' }
+let sel = null        // selected row (the object itself, so it survives sorting and filtering)
+let showDetails = false
+let saveTimer = null, saving = false, dirty = false, editing = false, error = ''
+
+// ---------- column types ----------
+function kind(name, col) {
+  const f = col.format || ''
+  if (name === 'id') return 'id'
+  if (f === 'jsonb' || f === 'json' || col.type === 'array' || col.type === 'object') return 'json'
+  if (col.type === 'boolean') return 'bool'
+  if (col.type === 'integer' || col.type === 'number') return 'num'
+  if (f.startsWith('timestamp')) return f.includes('with time zone') ? 'tz' : 'ts'
+  if (f === 'date') return 'date'
+  return 'text'
+}
+const typeLabel = col => ({ 'timestamp with time zone': 'timestamptz', 'timestamp without time zone': 'timestamp', 'character varying': 'varchar' })[col.format] ?? col.format ?? col.type
+const pad = n => String(n).padStart(2, '0')
+function toInput(v, k) { // a stored value -> what a date/time input wants
+  if (v == null || v === '') return ''
+  if (k === 'date') return String(v).slice(0, 10)
+  const d = new Date(v)
+  if (Number.isNaN(+d)) return ''
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+function fromInput(v, k) { // back to what the file stores; empty means null
+  if (!v) return null
+  if (k === 'tz') return new Date(v).toISOString()
+  if (k === 'ts') return v.length === 16 ? v + ':00' : v
+  return v
+}
+function display(v, k) {
+  if (v == null || v === '') return h('span', { className: 'nul', textContent: '—' })
+  if (k === 'bool') return h('span', { className: 'chk' + (v ? ' on' : '') })
+  if (k === 'tz' || k === 'ts') {
+    const d = new Date(v)
+    return Number.isNaN(+d) ? String(v) : d.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  }
+  if (k === 'json') {
+    if (typeof v !== 'object') return String(v)
+    const entries = Array.isArray(v) ? v.map(x => [null, x]) : Object.entries(v)
+    const frag = document.createDocumentFragment()
+    for (const [key, val] of entries.slice(0, 4)) frag.append(h('span', { className: 'chip' }, ...(key ? [h('b', { textContent: key }), ' '] : []), typeof val === 'object' ? JSON.stringify(val) : String(val)))
+    if (entries.length > 4) frag.append(h('span', { className: 'chip', textContent: `+${entries.length - 4}` }))
+    return frag
+  }
+  return String(v)
+}
+
+// ---------- loading and saving ----------
+const project = () => all.find(p => p.name === cur.name)
+const tableState = () => project()?.tables.find(t => t.table === cur.table)
+const clean = e => String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+
+async function load(keepSel = false) {
+  if (!cur.name || !cur.table) return render()
+  try {
+    const next = await api.call('rows', cur.name, cur.table)
+    const selId = keepSel && sel?.id
+    data = next
+    sel = selId != null ? data.rows.find(r => r.id === selId) ?? null : null
+    if (!keepSel) { showDetails = false; error = '' }
+  } catch (e) { data = null; error = clean(e) }
+  render()
+}
+
+function changed() {
+  dirty = true
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(save, 500)
+  renderFoot()
+}
+async function save() {
+  if (!data || saving) return
+  saving = true
+  const rows = data.rows
+  try {
+    data.mtime = await api.call('save-rows', cur.name, cur.table, rows)
+    error = ''
+    if (data.rows === rows) dirty = false
+  } catch (e) { error = clean(e) }
+  saving = false
+  if (dirty && !error) changed()
+  renderFoot()
+}
+
+// ---------- rendering ----------
+function render() {
+  const layout = settings.layout
+  document.body.classList.toggle('no-side', layout === 'inspector')
+  $('#side').hidden = layout === 'inspector'
+  renderSide(); renderTool(); renderTable(); renderInsp(); renderFoot()
+}
+
+function renderSide() {
+  const side = $('#side')
+  side.replaceChildren()
+  for (const p of all) {
+    side.append(h('h6', {}, p.name, ...(p.offline ? [h('span', { className: 'off', textContent: 'offline' })] : [])))
+    for (const t of p.tables) {
+      const b = h('button', { className: p.name === cur.name && t.table === cur.table ? 'on' : '', onclick: () => pick(p.name, t.table) })
+      b.innerHTML = t.format === 'json' ? JSON_ICON : TABLE_ICON
+      b.append(t.table, h('span', { className: 'st ' + t.state, title: t.state }))
+      side.append(b)
+    }
+  }
+  if (!all.length) side.append(h('div', { className: 'empty', textContent: 'No projects yet' }))
+}
+
+function renderTool() {
+  $('#title').replaceChildren(cur.table ?? 'No table', ...(cur.name ? [h('span', { textContent: ` · ${cur.name}` })] : []))
+  const tabs = $('#tabs')
+  tabs.hidden = settings.layout !== 'inspector' || !project()
+  tabs.replaceChildren(...(project()?.tables ?? []).map(t => h('button', { className: t.table === cur.table ? 'on' : '', textContent: t.table, onclick: () => pick(cur.name, t.table) })))
+  const t = tableState()
+  const words = { synced: 'Synced', syncing: 'Syncing…', offline: 'Offline', waiting: 'Waiting', paused: 'Paused', attention: 'Needs a look' }
+  $('#sync').replaceChildren(...(t ? [h('span', { className: 'st ' + t.state }), words[t.state] ?? t.state] : []))
+  $('#ext').textContent = t?.format === 'json' ? 'Open in VS Code' : 'Open in Excel'
+  $('#ext').disabled = !t
+  $('#add').disabled = !data || data.locked
+}
+
+function visibleRows() {
+  const q = $('#q').value.trim().toLowerCase()
+  if (!data) return []
+  if (!q) return data.rows
+  return data.rows.filter(r => Object.values(r).some(v => v != null && (typeof v === 'object' ? JSON.stringify(v) : String(v)).toLowerCase().includes(q)))
+}
+
+function renderTable() {
+  const wrap = $('#wrap')
+  if (!data) return wrap.replaceChildren(h('div', { className: 'empty', textContent: error || (cur.table ? 'Loading…' : 'Pick a table') }))
+  const cols = Object.entries(data.columns)
+  const head = h('tr', {}, ...cols.map(([name, col]) => h('th', {}, name, ...(data.required.includes(name) && name !== 'id' ? [h('span', { className: 'req', textContent: '*' })] : []), h('em', { textContent: typeLabel(col) }))))
+  const body = h('tbody')
+  for (const row of visibleRows()) {
+    const tr = h('tr', { className: row === sel ? 'sel' : '' })
+    tr.onclick = () => select(row)
+    for (const [name, col] of cols) {
+      const k = kind(name, col)
+      const td = h('td', { className: k === 'id' ? 'id' : '' }, k === 'id' && row.id == null ? h('span', { className: 'nul', textContent: 'new' }) : display(row[name], k))
+      if (k === 'bool') td.onclick = e => { if (row === sel && !data.locked) { e.stopPropagation(); row[name] = !row[name]; changed(); renderTable(); renderInsp() } }
+      td.ondblclick = () => {
+        if (k === 'id' || (k === 'json' && settings.layout !== 'sidebar')) openDetails(row, name)
+        else if (k !== 'bool') editCell(td, row, name, k)
+      }
+      tr.append(td)
+    }
+    body.append(tr)
+  }
+  if (!data.locked) body.append(h('tr', { className: 'add', onclick: addRow }, h('td', { className: 'id', textContent: '+' }), h('td', { colSpan: cols.length - 1, textContent: 'New row' })))
+  wrap.replaceChildren(h('table', {}, h('thead', {}, head), body))
+}
+
+function editCell(td, row, name, k) {
+  if (data.locked) return
+  editing = true
+  const type = k === 'num' ? 'number' : k === 'tz' || k === 'ts' ? 'datetime-local' : k === 'date' ? 'date' : 'text'
+  const start = k === 'json' ? (row[name] == null ? '' : JSON.stringify(row[name])) : type === 'text' || type === 'number' ? (row[name] ?? '') : toInput(row[name], k)
+  const input = h('input', { type, value: start, spellcheck: false })
+  let done = false
+  const finish = keep => {
+    if (done) return
+    done = true; editing = false
+    if (keep) {
+      let v = type === 'text' || type === 'number' ? (input.value === '' ? null : input.value) : fromInput(input.value, k)
+      if (k === 'json' && v !== null) try { v = JSON.parse(v) } catch {} // invalid JSON is saved as typed, and the save explains what's wrong
+      if (k === 'json' ? input.value !== start : v !== row[name]) { row[name] = v; changed() }
+    }
+    renderTable(); renderInsp()
+  }
+  input.onkeydown = e => { if (e.key === 'Enter') finish(true); if (e.key === 'Escape') { e.stopPropagation(); finish(false) } }
+  input.onblur = () => finish(true)
+  td.className = 'editing'
+  td.replaceChildren(input)
+  input.focus(); input.select?.()
+}
+
+function renderInsp() {
+  const insp = $('#insp')
+  const open = data && sel && (settings.layout === 'inspector' || (settings.layout === 'both' && showDetails))
+  insp.hidden = !(open || (settings.layout === 'inspector' && data))
+  if (insp.hidden) return
+  if (!sel) return insp.replaceChildren(h('div', { className: 'empty', textContent: 'Pick a row to see it here' }))
+  const row = sel
+  const titleCol = Object.keys(data.columns).find(c => ['title', 'name', 'label'].includes(c)) ?? Object.keys(data.columns).find(c => kind(c, data.columns[c]) === 'text')
+  const header = h('header', {}, h('div', { style: 'flex:1' }, h('h2', { textContent: (titleCol && row[titleCol]) || (row.id == null ? 'New row' : `Row ${row.id}`) }), h('div', { className: 'sub', textContent: row.id == null ? 'Not in Supabase yet: it gets an id when it syncs' : `id ${row.id}` })))
+  if (settings.layout === 'both') header.append(h('button', { className: 'btn icon', title: 'Close (Esc)', textContent: '✕', onclick: () => { showDetails = false; renderInsp() } }))
+  const fields = Object.entries(data.columns).map(([name, col]) => {
+    const k = kind(name, col)
+    const label = h('label', {}, h('span', {}, name, ...(data.required.includes(name) && name !== 'id' ? [h('span', { style: 'color:var(--bad)', textContent: ' *' })] : [])), h('em', { textContent: typeLabel(col) }))
+    const wrap = h('div', { className: 'field' }, label)
+    wrap.dataset.col = name
+    const set = v => { row[name] = v; changed(); renderTable() }
+    if (k === 'id') wrap.append(h('input', { value: row.id ?? 'new', disabled: true }))
+    else if (k === 'bool') wrap.append(h('input', { type: 'checkbox', className: 'toggle', checked: !!row[name], disabled: data.locked, onchange: e => set(e.target.checked) }))
+    else if (k === 'json') {
+      const ta = h('textarea', { value: row[name] == null ? '' : JSON.stringify(row[name], null, 2), spellcheck: false, disabled: data.locked })
+      ta.oninput = () => {
+        if (!ta.value.trim()) { wrap.classList.remove('bad'); return set(null) }
+        try { set(JSON.parse(ta.value)); wrap.classList.remove('bad') } catch { wrap.classList.add('bad') } // keep typing; only valid JSON is saved
+      }
+      wrap.append(ta)
+    } else {
+      const type = k === 'num' ? 'number' : k === 'tz' || k === 'ts' ? 'datetime-local' : k === 'date' ? 'date' : 'text'
+      const input = h('input', { type, value: type === 'text' || type === 'number' ? (row[name] ?? '') : toInput(row[name], k), spellcheck: false, disabled: data.locked })
+      input.oninput = () => set(type === 'text' || type === 'number' ? (input.value === '' ? null : input.value) : fromInput(input.value, k))
+      wrap.append(input)
+    }
+    return wrap
+  })
+  const actions = h('div', { className: 'actions' },
+    h('button', { className: 'btn', textContent: 'Duplicate', disabled: data.locked, onclick: () => duplicate(row) }),
+    h('button', { className: 'btn danger', textContent: 'Delete row', disabled: data.locked, onclick: () => remove(row) }))
+  insp.replaceChildren(header, ...fields, actions)
+}
+
+function renderFoot() {
+  const n = data?.rows.length ?? 0
+  $('#count').textContent = data ? `${n} ${n === 1 ? 'row' : 'rows'}` : ''
+  $('#path').textContent = data?.file?.replace(/^\/Users\/[^/]+/, '~') ?? ''
+  const t = tableState()
+  const msg = $('#msg')
+  let text = '', cls = ''
+  if (error) { text = error; cls = 'bad' }
+  else if (data?.locked) { text = 'Open in Excel: close it there to edit here'; cls = 'warn' }
+  else if (dirty || saving) { text = 'Saving…'; cls = 'warn' }
+  else if (t?.reason) { text = t.reason; cls = 'bad' }
+  else if (t?.rejected?.length) { text = `Supabase rejected ${t.rejected.length} ${t.rejected.length === 1 ? 'row' : 'rows'}: ${t.rejected[0].reason ?? ''}`; cls = 'bad' }
+  else if (t?.state === 'offline' && t.pending) { text = `${t.pending} waiting to sync`; cls = 'warn' }
+  msg.textContent = text
+  msg.className = 'msg ' + cls
+  msg.title = text
+}
+
+// ---------- actions ----------
+function pick(name, table) {
+  if (dirty) save()
+  cur = { name, table }
+  data = null; sel = null
+  $('#q').value = ''
+  load()
+}
+function select(row) {
+  if (editing) return
+  sel = row
+  if (settings.layout === 'both') showDetails = true
+  renderTable(); renderInsp()
+}
+function openDetails(row, col) {
+  sel = row
+  if (settings.layout === 'sidebar') return renderTable()
+  showDetails = true
+  renderTable(); renderInsp()
+  $(`.field[data-col="${CSS.escape(col)}"] :is(input, textarea)`)?.focus()
+}
+function blankRow() { return Object.fromEntries(Object.keys(data.columns).map(c => [c, null])) }
+function addRow() {
+  if (!data || data.locked) return
+  const row = blankRow()
+  data.rows.push(row)
+  changed()
+  const first = Object.keys(data.columns).find(c => c !== 'id')
+  if (settings.layout === 'sidebar') { sel = row; renderTable(); const td = [...$('#wrap tr.sel').children][Object.keys(data.columns).indexOf(first)]; td && editCell(td, row, first, kind(first, data.columns[first])) }
+  else openDetails(row, first)
+}
+function duplicate(row) {
+  const copy = { ...structuredClone(row), id: null }
+  data.rows.splice(data.rows.indexOf(row) + 1, 0, copy)
+  changed()
+  openDetails(copy, Object.keys(data.columns).find(c => c !== 'id'))
+}
+function remove(row) {
+  const name = row.title ?? row.name ?? (row.id == null ? 'this new row' : `row ${row.id}`)
+  if (!confirm(`Delete ${name}? It's removed from Supabase when this syncs.`)) return
+  data.rows.splice(data.rows.indexOf(row), 1)
+  sel = null; showDetails = false
+  changed()
+  renderTable(); renderInsp()
+}
+
+// ---------- wiring ----------
+$('#q').oninput = () => renderTable()
+$('#add').onclick = addRow
+$('#ext').onclick = () => api.call('open-external', cur.name, cur.table)
+$('#gear').onclick = e => { e.stopPropagation(); $('#pop').hidden = !$('#pop').hidden; syncRadios() }
+document.addEventListener('click', e => { if (!$('#pop').contains(e.target)) $('#pop').hidden = true })
+function syncRadios() { for (const r of document.querySelectorAll('#pop input')) r.checked = settings[r.name] === r.value }
+for (const r of document.querySelectorAll('#pop input')) r.onchange = async () => { settings = await api.call('settings', { [r.name]: r.value }); render() }
+
+document.addEventListener('keydown', e => {
+  const typing = e.target.closest('input, textarea')
+  if (e.key === 'Escape' && !typing) { $('#pop').hidden = true; if (settings.layout === 'both') { showDetails = false; renderInsp() } }
+  if ((e.metaKey && e.key === 'f')) { e.preventDefault(); $('#q').focus() }
+  if ((e.metaKey && e.key === 'n')) { e.preventDefault(); addRow() }
+  if (!typing && sel && (e.key === 'Backspace' || e.key === 'Delete') && !data?.locked) remove(sel)
+  if (!typing && sel && data && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    const rows = visibleRows(), i = rows.indexOf(sel) + (e.key === 'ArrowDown' ? 1 : -1)
+    if (rows[i]) { e.preventDefault(); select(rows[i]) }
+  }
+})
+
+api.onState(s => {
+  all = s
+  if (!project()?.tables.some(t => t.table === cur.table)) { const p = s.find(p => p.tables.length); if (p && !cur.table) cur = { name: p.name, table: p.tables[0].table } }
+  renderSide(); renderTool(); renderFoot()
+  // The engine rewrites the file when Supabase changes; pick that up unless you're mid-edit.
+  if (data && !dirty && !saving && !editing) api.call('rows', cur.name, cur.table).then(next => { if (next.mtime !== data.mtime && !dirty && !editing) { const id = sel?.id; data = next; sel = id != null ? data.rows.find(r => r.id === id) ?? null : null; renderTable(); renderInsp(); renderFoot() } }).catch(() => {})
+})
+api.onSelect(which => pick(which.name, which.table))
+api.onSettings(s => { settings = s; render() })
+window.addEventListener('beforeunload', () => { if (dirty) save() })
+
+;(async () => {
+  settings = await api.call('settings')
+  all = await api.call('state')
+  if (!cur.table) { const p = all.find(p => p.tables.length); if (p) cur = { name: p.name, table: p.tables[0].table } }
+  load()
+})()
+</script>
+</body>
+</html>

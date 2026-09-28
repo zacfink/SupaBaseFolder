@@ -373,6 +373,28 @@ class Project {
     fs.writeFileSync(path.join(this.dir, '_schema.md'), lines.join('\n'))
   }
 
+  // The table window reads and writes the same file anyone else would, so the watcher syncs its saves like any other.
+  readRows(table) {
+    const { columns, required } = this.schema[table]
+    const file = this.file(table)
+    const snap = coerceRows(readJson(this.snapFile(table), []), columns).rows
+    const exists = fs.existsSync(file)
+    return {
+      columns, required, file,
+      rows: exists ? readTable(file, columns, snap).rows : snap,
+      mtime: exists ? fs.statSync(file).mtimeMs : 0,
+      locked: this.locked(table),
+    }
+  }
+
+  // Rows come from the window as loosely typed values; coercing here gives the same "Row 3, capacity: ..." errors a bad save would.
+  writeRows(table, raw) {
+    if (this.locked(table)) throw new Error(`${table}.xlsx is open in Excel. Close it there to edit here.`)
+    const { columns } = this.schema[table]
+    writeTable(this.file(table), coerceRows(raw, columns).rows, columns)
+    return fs.statSync(this.file(table)).mtimeMs
+  }
+
   summary() {
     return {
       name: this.name,

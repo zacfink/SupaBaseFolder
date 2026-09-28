@@ -20,6 +20,10 @@ the file updates live.
   the Activity list.
 - **Plays nicely with Excel.** It waits while a workbook is open, so it never writes over your unsaved
   edits.
+- **Its own table window.** Open (or right-click › Open a table) shows the table in a native-looking
+  window: typed cells, inline editing, a details panel for a row, search, add and delete. It edits the same
+  file, so it syncs like any other save. The gear picks the layout, and whether Open uses this window or
+  Excel / VS Code.
 - **Offline-friendly.** Edits made offline queue up and sync on reconnect.
 - **Agent-friendly.** Each project folder has a generated `_schema.md` describing every table,
   column and rule, so an AI agent can read it and edit the files correctly.

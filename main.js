@@ -8,7 +8,7 @@ const { fetchSchema } = require('./src/remote')
 const SYNC_EVERY_MS = 30_000 // backstop: offline reconnects and tables missing from the Realtime publication
 const projects = new Map()
 const broken = new Map() // project name -> why it couldn't start
-let tray, win
+let tray, win, tableWin
 const WIDTH = 360
 
 // Keys are encrypted with safeStorage (its key lives in the macOS Keychain) and kept out of ~/Backend.
@@ -24,6 +24,20 @@ function forgetKey(name) {
   const keys = loadKeys()
   delete keys[name]
   fs.writeFileSync(keysFile(), JSON.stringify(keys), { mode: 0o600 })
+}
+
+// Settings the table window changes. layout: 'both' (sidebar + details on click), 'sidebar' (no details panel),
+// 'inspector' (details always shown, tables as tabs). openWith: what the menu bar's Open button does.
+const DEFAULTS = { layout: 'both', openWith: 'app' }
+const settingsFile = () => path.join(app.getPath('userData'), 'settings.json')
+const loadSettings = () => { try { return { ...DEFAULTS, ...JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) } } catch { return { ...DEFAULTS } } }
+function saveSettings(change) {
+  const s = loadSettings()
+  if ('layout' in change && ['both', 'sidebar', 'inspector'].includes(change.layout)) s.layout = change.layout
+  if ('openWith' in change && ['app', 'external'].includes(change.openWith)) s.openWith = change.openWith
+  fs.writeFileSync(settingsFile(), JSON.stringify(s))
+  tableWin?.webContents.send('settings', s)
+  return s
 }
 
 const state = () => [
@@ -46,6 +60,29 @@ function refresh() {
   const s = state()
   tray?.setTitle(title(s), { fontType: 'monospacedDigit' })
   win?.webContents.send('state', s)
+  tableWin?.webContents.send('state', s)
+}
+
+function openExternal(file) {
+  if (file.endsWith('.json')) execFile('open', ['-a', 'Visual Studio Code', file], err => err && shell.openPath(file))
+  else shell.openPath(file)
+}
+
+// One table window; opening another table just switches it. The Dock icon shows while it's open so it can be Cmd-Tabbed to.
+function openTableWindow(name, table) {
+  if (tableWin) {
+    tableWin.webContents.send('select', { name, table })
+    return tableWin.show()
+  }
+  tableWin = new BrowserWindow({
+    width: 1120, height: 700, minWidth: 720, minHeight: 420, show: false,
+    titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 18 }, vibrancy: 'sidebar', visualEffectState: 'followWindow',
+    backgroundColor: '#00000000',
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  })
+  tableWin.loadFile('table.html', { query: { name, table } })
+  tableWin.once('ready-to-show', () => { app.dock?.show(); tableWin.show() })
+  tableWin.on('closed', () => { tableWin = null; app.dock?.hide() })
 }
 
 function startProject(name) {
@@ -76,9 +113,17 @@ const getTable = (name, table) => {
 ipcMain.handle('sync', () => Promise.all([...projects.values()].map(p => p.syncAll())))
 ipcMain.handle('open', (_, name, table) => {
   const file = getTable(name, table).file(table)
-  if (file.endsWith('.json')) execFile('open', ['-a', 'Visual Studio Code', file], err => err && shell.openPath(file))
-  else shell.openPath(file)
+  if (loadSettings().openWith === 'app') { win?.hide(); openTableWindow(name, table) }
+  else openExternal(file)
 })
+ipcMain.handle('open-external', (_, name, table) => openExternal(getTable(name, table).file(table)))
+ipcMain.handle('state', () => state())
+ipcMain.handle('rows', (_, name, table) => getTable(name, table).readRows(table))
+ipcMain.handle('save-rows', (_, name, table, rows) => {
+  if (!Array.isArray(rows)) throw new Error('Rows must be a list')
+  return getTable(name, table).writeRows(table, rows)
+})
+ipcMain.handle('settings', (_, change) => change ? saveSettings(change) : loadSettings())
 ipcMain.handle('confirm', (_, name, table) => getTable(name, table).sync(table, { confirmDeletes: true }))
 ipcMain.handle('restore', (_, name, logId) => get(name).restore(logId))
 ipcMain.handle('format', (_, name, table, format) => {
@@ -148,6 +193,9 @@ else app.whenReady().then(() => {
   tray.on('right-click', () => tray.popUpContextMenu(Menu.buildFromTemplate([
     { label: 'Sync now', click: () => projects.forEach(p => p.syncAll()) },
     { label: 'Open Backend folder', click: () => shell.openPath(ROOT) },
+    { label: 'Open a table', enabled: state().some(p => p.tables.length), submenu: state().flatMap(p => p.tables.map(t => ({
+      label: `${p.name} › ${t.table}`, click: () => openTableWindow(p.name, t.table),
+    }))) },
     { type: 'separator' },
     { label: 'Disconnect a project', enabled: state().length > 0, submenu: state().map(p => ({
       label: `${p.name}…`, click: () => { show(); win.webContents.send('remove', p.name) },
