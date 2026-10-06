@@ -53,5 +53,30 @@ app.whenReady().then(async () => {
   await tw.webContents.executeJavaScript("document.querySelectorAll('tbody tr')[2].click()")
   await new Promise(r => setTimeout(r, 400))
   fs.writeFileSync(path.join(root, 'docs', 'table-window.png'), (await tw.webContents.capturePage()).toPNG())
+
+  // A JSON column opened as a tree: a one-row content table, the way a site keeps its copy.
+  const content = {
+    hero: { title: 'Northside Bakery', tagline: 'Sourdough, every morning at 7.' },
+    menu: [
+      { item: 'Country loaf', price: 9, available: true },
+      { item: 'Cinnamon bun', price: 4.5, available: true },
+      { item: 'Rye', price: 10, available: false },
+    ],
+    hours: { weekdays: '7am – 6pm', weekends: '8am – 3pm' },
+    faq: [
+      { q: 'Do you take orders?', a: 'Yes, until 4pm the day before.' },
+      { q: 'Gluten-free?', a: 'Not yet. Our kitchen shares flour.' },
+    ],
+  }
+  ipcMain.removeHandler('rows')
+  ipcMain.removeHandler('state')
+  ipcMain.handle('state', () => [{ name: 'Bakery', offline: null, tables: [t('site_content', 'json', 'ok')] }])
+  ipcMain.handle('rows', () => ({ columns: { id: { type: 'string', format: 'text' }, data: { format: 'jsonb' } }, required: ['id', 'data'],
+    rows: [{ id: 'live', data: content }], file: path.join('/Users/you/Backend/Bakery/site_content.json'), mtime: 1, locked: false }))
+  await tw.loadFile(path.join(root, 'table.html'), { query: { name: 'Bakery', table: 'site_content' } })
+  await new Promise(r => setTimeout(r, 500))
+  await tw.webContents.executeJavaScript("document.querySelectorAll('tbody tr')[0].click(); for (const p of ['data/menu', 'data/menu/0', 'data/hero']) treeOpen.add(p); renderInsp()")
+  await new Promise(r => setTimeout(r, 400))
+  fs.writeFileSync(path.join(root, 'docs', 'json-tree.png'), (await tw.webContents.capturePage()).toPNG())
   app.quit() // closing the menu bar window earlier would have quit the app before this window loaded
 })
