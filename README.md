@@ -36,8 +36,11 @@ Click **Open** next to a table in the menu bar window, or right-click the menu b
 - Cells show by type: checkboxes for booleans, readable dates, JSON as `key value` tags. Required
   columns are starred, and each header shows its Postgres type.
 - Double-click a cell to edit it. Click a checkbox in the selected row to flip it. Pick a row to open the
-  details panel, a form with a field for each column (dates, numbers, switches, a JSON editor), plus
+  details panel, a form with a field for each column (dates, numbers, switches, JSON), plus
   Duplicate and Delete.
+- JSON columns open as a tree. Each branch folds open with a one-line preview of what's inside;
+  text, numbers and switches edit in place; lists get **+ Add** (a blank copy of the last item) and ✕ to
+  remove. The names are your JSON's own keys. **Edit as raw JSON** switches to a plain text box.
 - Add a row with **+ Row**, the "New row" line or ⌘N. It gets its `id` from Supabase when it syncs.
   Delete the selected row with ⌫ (it asks first). ⌘F searches, ↑/↓ move between rows.
 - It writes the table's own file, so saves here sync exactly like saves from Excel, and they go through the
@@ -53,7 +56,15 @@ Click **Open** next to a table in the menu bar window, or right-click the menu b
 | Layout | Sidebar, with details when you pick a row (default) · Sidebar and table only · Table with details always shown, tables as tabs |
 | The menu bar's Open button opens | This window (default) · Excel for `.xlsx`, VS Code for `.json` |
 
-## Run it
+## Download
+
+Get `SupaBaseFolder.zip` from the [latest release](https://github.com/zacfink/SupaBaseFolder/releases/latest),
+unzip it and drag the app to Applications. It's built for Apple Silicon Macs.
+
+The app isn't signed by Apple, so the first launch is blocked: right-click it › **Open** › **Open**, or
+allow it in System Settings › Privacy & Security. After that it opens normally.
+
+## Run it from source
 
 ```sh
 npm install

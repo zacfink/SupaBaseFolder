@@ -8,6 +8,7 @@ const { fetchSchema, connect } = require('./remote')
 const ROOT = path.join(os.homedir(), 'Backend')
 const DEBOUNCE_MS = 1000
 const TIMEOUT_MS = 30_000
+const STALL_MS = 120_000 // a whole sync run, which can be several timed-out calls in a row
 
 const readJson = (file, fallback) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return fallback } }
 const writeJson = (file, value) => {
@@ -50,6 +51,7 @@ class Project {
     this.timers = {}
     this.watchError = null
     this.stopped = false
+    this.stallMs = STALL_MS
   }
 
   start() {
@@ -132,9 +134,21 @@ class Project {
     this.timers[table] = setTimeout(() => this.sync(table), DEBOUNCE_MS)
   }
 
-  // One job at a time per table.
+  // One job at a time per table. A job that never settles would block the table for good (seen
+  // 2026-10-06: no error, no log line, every later sync queued behind it), so after stallMs the
+  // queue gives up on it, logs it, flags the table and moves on.
   enqueue(table, fn) {
-    const next = (this.queues[table] ?? Promise.resolve()).then(fn)
+    const next = (this.queues[table] ?? Promise.resolve()).then(() => {
+      let timer
+      const stalled = new Promise(resolve => {
+        timer = setTimeout(() => {
+          this.log({ table, type: 'stalled', afterMs: this.stallMs })
+          this.set(table, { state: 'attention', reason: `A sync ran for over ${Math.round(this.stallMs / 60000)} minutes and was abandoned. The next one starts fresh.` })
+          resolve()
+        }, this.stallMs)
+      })
+      return Promise.race([Promise.resolve().then(fn), stalled]).finally(() => clearTimeout(timer))
+    })
     this.queues[table] = next.catch(() => {})
     return next
   }

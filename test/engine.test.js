@@ -35,6 +35,18 @@ test('stop() waits for a job already running, so trashing after it is safe', asy
   assert.ok(landed)
 })
 
+test('a job that never settles is abandoned, so the table keeps syncing', async () => {
+  const p = stoppedProject()
+  p.stallMs = 30
+  p.enqueue('t', () => new Promise(() => {})) // hangs forever
+  let ran = false
+  await p.enqueue('t', () => { ran = true })
+  assert.ok(ran)
+  assert.equal(p.status.t.state, 'attention')
+  const log = fs.readFileSync(path.join(ROOT, 'T', '.sync', 'log.jsonl'), 'utf8')
+  assert.match(log, /"type":"stalled"/)
+})
+
 test('the table window reads typed rows and writes them back as the file', () => {
   Project.create('W', 'https://example.supabase.co')
   const p = new Project('W', 'key')
