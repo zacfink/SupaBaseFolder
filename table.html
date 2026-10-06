@@ -93,6 +93,28 @@
   .field input:focus, .field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgb(10 100 214 / .3); }
   .field input:disabled { color: var(--muted); }
   .field.bad textarea { border-color: var(--bad); }
+
+  /* JSON cells in the details panel: a collapsible tree whose values edit in place */
+  .insp.wide { width: 440px; }
+  .field .tree { background: var(--field); border: .5px solid var(--line); border-radius: 6px; padding: 4px 4px 6px; font-size: 12.5px; }
+  .field .tree .row { display: flex; align-items: start; gap: 2px; }
+  .field .tree .branch { display: flex; gap: 6px; align-items: baseline; flex: 1; min-width: 0; border: 0; background: none; padding: 3px 4px; border-radius: 4px; text-align: left; }
+  .field .tree .branch:hover { background: var(--chip); }
+  .field .tree .tw { width: 10px; flex: none; color: var(--muted); }
+  .field .tree .key { flex: none; color: var(--muted); font: 11.5px var(--mono); }
+  .field .tree .sum { min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .field .tree .kids { margin-left: 9px; padding-left: 6px; border-left: .5px solid var(--line); }
+  .field .tree .leaf { display: flex; align-items: start; gap: 6px; flex: 1; min-width: 0; padding: 1px 4px 1px 20px; }
+  .field .tree .leaf .key { padding-top: 4px; }
+  .field .tree textarea, .field .tree input[type=number] { flex: 1; width: auto; min-width: 0; min-height: 0; font: inherit; line-height: 1.35;
+    border: .5px solid transparent; border-radius: 4px; background: transparent; padding: 3px 5px; resize: none; overflow: hidden; box-shadow: none; }
+  .field .tree textarea:hover, .field .tree input[type=number]:hover { border-color: var(--line); }
+  .field .tree textarea:focus, .field .tree input[type=number]:focus { border-color: var(--accent); background: var(--bg); box-shadow: none; }
+  .field .tree .null { padding-top: 3px; color: var(--muted); font-style: italic; }
+  .field .tree .rm { flex: none; border: 0; background: none; color: var(--muted); padding: 3px 5px; opacity: 0; }
+  .field .tree .row:hover > .rm, .field .tree .rm:focus { opacity: 1; }
+  .field .tree .add { border: 0; background: none; color: var(--accent); padding: 3px 4px 3px 20px; font-size: 12px; }
+  .field .tree-toggle { margin-top: 6px; border: 0; background: none; color: var(--accent); padding: 0; font-size: 12px; }
   .toggle { appearance: none; width: 32px; height: 19px; border-radius: 10px; background: #8e8e93; position: relative; margin: 0; transition: background .15s; }
   .toggle::after { content: ""; position: absolute; width: 15px; height: 15px; border-radius: 50%; background: #fff; top: 2px; left: 2px; transition: left .15s; box-shadow: 0 1px 2px rgb(0 0 0 / .25); }
   .toggle:checked { background: var(--good); } .toggle:checked::after { left: 15px; }
@@ -151,6 +173,8 @@ let cur = { name: params.get('name'), table: params.get('table') }
 let all = [], data = null, settings = { layout: 'both', openWith: 'app' }
 let sel = null        // selected row (the object itself, so it survives sorting and filtering)
 let showDetails = false
+const treeOpen = new Set()   // tree branches you opened, by path, so they stay open across redraws
+const rawJson = new Set()    // json columns you switched to the raw text box
 let saveTimer = null, saving = false, dirty = false, editing = false, error = ''
 
 // ---------- column types ----------
@@ -195,6 +219,45 @@ function display(v, k) {
     return frag
   }
   return String(v)
+}
+
+// ---------- JSON tree ----------
+// Objects and arrays fold open and shut; strings, numbers and booleans edit in place. Edits change the
+// value inside the row and call save(), so they go through the same debounced save as every other field.
+function jsonTree(root, save, locked, base) {
+  const box = h('div', { className: 'tree' })
+  const summary = v => Array.isArray(v) ? `[${v.length}]`
+    : Object.values(v).filter(x => x !== null && typeof x !== 'object').slice(0, 2).join(' · ') || `{${Object.keys(v).length}}`
+  // a new array item shaped like the last one, with its text emptied
+  const blank = v => Array.isArray(v) ? [] : v !== null && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, blank(x)]))
+    : typeof v === 'number' ? 0 : typeof v === 'boolean' ? false : v === null ? null : ''
+  const value = (parent, key) => {
+    const v = parent[key], put = x => { parent[key] = x; save() }
+    if (typeof v === 'boolean') return h('input', { type: 'checkbox', checked: v, disabled: locked, onchange: e => put(e.target.checked) })
+    if (typeof v === 'number') return h('input', { type: 'number', value: v, disabled: locked, oninput: e => { if (e.target.value !== '') put(Number(e.target.value)) } })
+    if (v === null) return h('span', { className: 'null', textContent: 'null' })
+    const ta = h('textarea', { value: v, rows: 1, spellcheck: false, disabled: locked })
+    const fit = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px' }
+    ta.oninput = () => { fit(); put(ta.value) }
+    requestAnimationFrame(fit)
+    return ta
+  }
+  const node = (parent, key, path) => {
+    const v = parent[key], label = Array.isArray(parent) ? String(key + 1) : key
+    const rm = Array.isArray(parent) && !locked
+      ? [h('button', { className: 'rm', title: 'Remove', textContent: '✕', onclick: () => { parent.splice(key, 1); save(); draw() } })] : []
+    if (v === null || typeof v !== 'object') return [h('div', { className: 'row' }, h('div', { className: 'leaf' }, h('span', { className: 'key', textContent: label }), value(parent, key)), ...rm)]
+    const open = treeOpen.has(path)
+    const head = h('div', { className: 'row' }, h('button', { className: 'branch', onclick: () => { open ? treeOpen.delete(path) : treeOpen.add(path); draw() } },
+      h('span', { className: 'tw', textContent: open ? '▾' : '▸' }), h('span', { className: 'key', textContent: label }), h('span', { className: 'sum', textContent: summary(v) })), ...rm)
+    if (!open) return [head]
+    const kids = h('div', { className: 'kids' }, ...Object.keys(v).flatMap(k => node(v, Array.isArray(v) ? Number(k) : k, `${path}/${k}`)))
+    if (Array.isArray(v) && !locked) kids.append(h('button', { className: 'add', textContent: '+ Add', onclick: () => { v.push(v.length ? blank(v[v.length - 1]) : ''); save(); draw() } }))
+    return [head, kids]
+  }
+  const draw = () => box.replaceChildren(...Object.keys(root).flatMap(k => node(root, Array.isArray(root) ? Number(k) : k, `${base}/${k}`)))
+  draw()
+  return box
 }
 
 // ---------- loading and saving ----------
@@ -344,7 +407,11 @@ function renderInsp() {
     const set = v => { row[name] = v; changed(); renderTable() }
     if (k === 'id') wrap.append(h('input', { value: row.id ?? 'new', disabled: true }))
     else if (k === 'bool') wrap.append(h('input', { type: 'checkbox', className: 'toggle', checked: !!row[name], disabled: data.locked, onchange: e => set(e.target.checked) }))
-    else if (k === 'json') {
+    else if (k === 'json' && row[name] !== null && typeof row[name] === 'object' && !rawJson.has(name)) {
+      wrap.append(jsonTree(row[name], () => set(row[name]), data.locked, name),
+        h('button', { className: 'tree-toggle', textContent: 'Edit as raw JSON', onclick: () => { rawJson.add(name); renderInsp() } }))
+    } else if (k === 'json') {
+      if (rawJson.has(name)) label.append(h('button', { className: 'tree-toggle', style: 'margin:0', textContent: 'Back to tree', onclick: () => { rawJson.delete(name); renderInsp() } }))
       const ta = h('textarea', { value: row[name] == null ? '' : JSON.stringify(row[name], null, 2), spellcheck: false, disabled: data.locked })
       ta.oninput = () => {
         if (!ta.value.trim()) { wrap.classList.remove('bad'); return set(null) }
@@ -362,6 +429,7 @@ function renderInsp() {
   const actions = h('div', { className: 'actions' },
     h('button', { className: 'btn', textContent: 'Duplicate', disabled: data.locked, onclick: () => duplicate(row) }),
     h('button', { className: 'btn danger', textContent: 'Delete row', disabled: data.locked, onclick: () => remove(row) }))
+  insp.classList.toggle('wide', Object.entries(data.columns).some(([n, c]) => kind(n, c) === 'json' && row[n] !== null && typeof row[n] === 'object'))
   insp.replaceChildren(header, ...fields, actions)
 }
 
