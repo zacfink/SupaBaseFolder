@@ -20,9 +20,9 @@
 </p>
 
 <p align="center">
-  <img src="docs/menu-bar.png" height="300" alt="The menu bar window listing synced tables and their status">
+  <img src="docs/menu-bar.png" height="260" alt="The menu bar window listing synced tables and their status">
   &nbsp;
-  <img src="docs/table-window.png" height="300" alt="The table window: typed cells and a details panel for the selected row">
+  <img src="docs/table-window.png" height="260" alt="The table window: typed cells and a details panel for the selected row">
 </p>
 
 ---
@@ -33,7 +33,7 @@ about a second. When your app writes to Supabase, the file updates on its own.
 
 ```mermaid
 flowchart LR
-  you["Excel · VS Code · AI agent<br/>or the table window"] -- edit --> file["~/Backend/project/<br/>table.xlsx or table.json"]
+  you["Excel · VS Code · AI agent<br/>or the table window"] -- edit --> file["~/Backend/your-project/<br/>table.xlsx or table.json"]
   file -- "save: pushed in ~1s" --> db[("Supabase")]
   db -- "change: file rewritten live" --> file
 ```
