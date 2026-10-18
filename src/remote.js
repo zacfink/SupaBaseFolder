@@ -1,6 +1,19 @@
 const { createClient } = require('@supabase/supabase-js')
 
 const PAGE = 1000
+const PARALLEL = 6
+
+// Every row, PAGE at a time, PARALLEL pages in flight. count is a hint taken just before: rows
+// added since then show up in the full last page and are fetched one page at a time after it.
+async function fetchPages(getPage, count) {
+  const pages = []
+  let next = 0
+  const worker = async () => { for (let i; (i = next++) * PAGE < count;) pages[i] = await getPage(i * PAGE, i * PAGE + PAGE - 1) }
+  await Promise.all(Array.from({ length: PARALLEL }, worker))
+  for (let from = pages.length * PAGE; !pages.length || pages.at(-1).length === PAGE; from += PAGE) pages.push(await getPage(from, from + PAGE - 1))
+  const seen = new Set()
+  return pages.flat().filter(r => !seen.has(r.id) && seen.add(r.id)) // a row shifting pages mid-fetch would show up twice
+}
 // Legacy keys are JWTs and also go in Authorization; new sb_secret_ keys only go in apikey.
 const headers = key => (key.startsWith('eyJ') ? { apikey: key, Authorization: `Bearer ${key}` } : { apikey: key })
 
@@ -25,12 +38,9 @@ function connect(url, key) {
   }
   return {
     async fetchAll(table) {
-      const rows = []
-      for (let from = 0; ; from += PAGE) {
-        const page = check(await db.from(table).select('*').order('id').range(from, from + PAGE - 1))
-        rows.push(...page)
-        if (page.length < PAGE) return rows
-      }
+      const { count, error, status } = await db.from(table).select('*', { count: 'exact', head: true })
+      check({ data: null, error, status })
+      return fetchPages(async (from, to) => check(await db.from(table).select('*').order('id').range(from, to)), count ?? 0)
     },
     upsert: async (table, row) => check(await db.from(table).upsert(row).select().single()),
     remove: async (table, id) => { check(await db.from(table).delete().eq('id', id)) },
@@ -39,4 +49,4 @@ function connect(url, key) {
   }
 }
 
-module.exports = { fetchSchema, connect }
+module.exports = { fetchSchema, connect, fetchPages, PAGE }
