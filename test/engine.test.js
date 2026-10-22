@@ -62,3 +62,21 @@ test('the table window reads typed rows and writes them back as the file', () =>
   fs.writeFileSync(path.join(ROOT, 'W', '~$e.xlsx'), '')
   assert.throws(() => p.writeRows('e', rows), /open in Excel/)
 })
+
+test('approval mode pauses a save that would push, and Confirm lets it through', async () => {
+  const p = stoppedProject()
+  p.schema.t.columns.name = { type: 'text' }
+  p.config.approve = true
+  const remote = [{ id: 1, name: 'a' }], pushed = []
+  p.remote = { fetchAll: async () => remote, upsert: async (_, row) => { pushed.push(row); return row }, remove: async () => {} }
+  fs.mkdirSync(path.dirname(p.snapFile('t')), { recursive: true })
+  fs.writeFileSync(p.snapFile('t'), JSON.stringify(remote))
+  fs.writeFileSync(p.file('t'), JSON.stringify([{ id: 1, name: 'agent edit' }]))
+  await p.syncTable('t')
+  assert.equal(p.status.t.state, 'paused')
+  assert.equal(p.status.t.needsConfirm, true)
+  assert.match(p.status.t.reason, /Approval is on: this save would push 1 edited/)
+  assert.deepEqual(pushed, [])
+  await p.syncTable('t', { confirmDeletes: true })
+  assert.equal(pushed.length, 1)
+})

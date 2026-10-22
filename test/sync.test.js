@@ -1,6 +1,6 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const { diff, arrange, applyChanges, tooManyDeletes } = require('../src/diff')
+const { diff, arrange, applyChanges, tooManyDeletes, pushSummary } = require('../src/diff')
 
 const row = (id, name, extra = {}) => ({ id, name, ...extra })
 
@@ -72,6 +72,11 @@ test('delete guard trips above 5', () => {
   const rows = n => Array.from({ length: n }, (_, i) => row(i + 1, 'x'))
   assert.equal(tooManyDeletes(diff(rows(5), [], rows(5))), false)
   assert.equal(tooManyDeletes(diff(rows(6), [], rows(6))), true)
+})
+
+test('approval mode summarizes what a save would push, and nothing for a pull', () => {
+  assert.equal(pushSummary(diff([row(1, 'a'), row(2, 'b')], [row(1, 'z'), row(null, 'new')], [row(1, 'a'), row(2, 'b')])), '1 new, 1 edited, 1 deleted')
+  assert.equal(pushSummary(diff([row(1, 'a')], [row(1, 'a')], [row(1, 'b')])), '')
 })
 
 test('arrange keeps file order, fills new ids, keeps rejected rows, appends remote-only rows', () => {

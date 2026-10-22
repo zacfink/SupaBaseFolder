@@ -82,6 +82,11 @@ Click **Open** next to a table in the menu bar window, or right-click the menu b
   values get clear errors, like `Row 3, capacity: "lots" is not a number`.
 - It follows the Mac's light or dark mode.
 
+**Approval mode** (for AI agents): add `"approve": true` to a project's `.sync/config.json`. Then every save that
+would change Supabase pauses until you click **Confirm and sync** in the menu bar, with a line saying what it would
+push ("1 new, 2 edited"). An agent can still propose changes by saving files, but it can't act on what it read in
+your data without you. The project's `_schema.md` tells the agent approval is on.
+
 **Settings** (the gear in the window's toolbar):
 
 | Setting | Options |

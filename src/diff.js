@@ -50,6 +50,11 @@ function diff(snapshot, local, remote, { localMtime = 0 } = {}) {
 }
 
 const tooManyDeletes = d => d.push.deletes.length > DELETE_LIMIT
+// Approval mode: what a save would push, in words, or '' when it pushes nothing.
+function pushSummary(d) {
+  const n = { new: d.push.inserts.length, edited: d.push.updates.length, deleted: d.push.deletes.length }
+  return Object.entries(n).filter(([, v]) => v).map(([k, v]) => `${v} ${k}`).join(', ')
+}
 
 // Lay rows on top of a row list by id. A change of { id, _deleted: true } removes that row.
 function applyChanges(rows, changes) {
@@ -78,4 +83,4 @@ function arrange(local, remote, { inserted = new Map(), rejected = new Set() } =
   return out
 }
 
-module.exports = { diff, arrange, applyChanges, tooManyDeletes, stable, DELETE_LIMIT }
+module.exports = { diff, arrange, applyChanges, tooManyDeletes, pushSummary, stable, DELETE_LIMIT }

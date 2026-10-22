@@ -1,7 +1,7 @@
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
-const { diff, arrange, applyChanges, tooManyDeletes, stable } = require('./diff')
+const { diff, arrange, applyChanges, tooManyDeletes, pushSummary, stable } = require('./diff')
 const { coerceRows, readTable, writeTable } = require('./formats')
 const { fetchSchema, connect } = require('./remote')
 
@@ -235,6 +235,9 @@ class Project {
     const guards = confirmDeletes ? [] : [
       ...wiped.map(col => `The column "${col}" is missing from the file, so this save would empty it in Supabase.`),
       ...(tooManyDeletes(d) ? [`This save would delete ${d.push.deletes.length} rows from Supabase.`] : []),
+      // approval mode ("approve": true in .sync/config.json): every change from a file waits for a person to confirm,
+      // so an AI agent that read the data can't act on it alone
+      ...(this.config.approve && pushSummary(d) ? [`Approval is on: this save would push ${pushSummary(d)} row(s) to Supabase.`] : []),
     ]
     if (guards.length) {
       this.savePendingInserts(table, matched)
@@ -375,6 +378,7 @@ class Project {
       '- AI editing: prefer the `.json` tables. A key left out of a row that has an `id` keeps its current value; on a new row (empty `id`) it gets the column default.',
       '- In a `.xlsx` table, deleting a column header pauses the table until it is confirmed in the menu bar app.',
       '- A save that deletes more than 5 rows pauses the table until it is confirmed in the menu bar app.',
+      ...(this.config.approve ? ['- **Approval is on for this folder:** every save that changes Supabase pauses until a person confirms it in the menu bar app. Saving is still how you propose a change; say what you changed and why.'] : []),
       '- Live updates from Supabase need the table in the `supabase_realtime` publication; without it they arrive within 30 seconds.',
       '- Re-read a table file right before editing it; the app rewrites it when Supabase changes.', '',
     ]
