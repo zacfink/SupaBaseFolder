@@ -235,9 +235,9 @@ class Project {
     const guards = confirmDeletes ? [] : [
       ...wiped.map(col => `The column "${col}" is missing from the file, so this save would empty it in Supabase.`),
       ...(tooManyDeletes(d) ? [`This save would delete ${d.push.deletes.length} rows from Supabase.`] : []),
-      // approval mode ("approve": true in .sync/config.json): every change from a file waits for a person to confirm,
-      // so an AI agent that read the data can't act on it alone
-      ...(this.config.approve && pushSummary(d) ? [`Approval is on: this save would push ${pushSummary(d)} row(s) to Supabase.`] : []),
+      // approval mode: every change from a file waits for a person to confirm, so an AI agent that read the data
+      // can't act on it alone. See approval(): the agent can turn it on, never off.
+      ...(this.approval() && pushSummary(d) ? [`Approval is on: this save would push ${pushSummary(d)} row(s) to Supabase.`] : []),
     ]
     if (guards.length) {
       this.savePendingInserts(table, matched)
@@ -378,7 +378,7 @@ class Project {
       '- AI editing: prefer the `.json` tables. A key left out of a row that has an `id` keeps its current value; on a new row (empty `id`) it gets the column default.',
       '- In a `.xlsx` table, deleting a column header pauses the table until it is confirmed in the menu bar app.',
       '- A save that deletes more than 5 rows pauses the table until it is confirmed in the menu bar app.',
-      ...(this.config.approve ? ['- **Approval is on for this folder:** every save that changes Supabase pauses until a person confirms it in the menu bar app. Saving is still how you propose a change; say what you changed and why.'] : []),
+      ...(this.approval() ? ['- **Approval is on for this folder:** every save that changes Supabase pauses until a person confirms it in the menu bar app. Saving is still how you propose a change; say what you changed and why.'] : []),
       '- Live updates from Supabase need the table in the `supabase_realtime` publication; without it they arrive within 30 seconds.',
       '- Re-read a table file right before editing it; the app rewrites it when Supabase changes.', '',
     ]
@@ -423,6 +423,25 @@ class Project {
       })),
     }
   }
+}
+
+// Approval mode is recorded outside ~/Backend (main.js points this at the app's userData), because anything in the
+// folder can be edited by the agent the mode is meant to check. "approve": true in .sync/config.json can only turn
+// it on; it's switched off only through setApproval, which the menu bar calls.
+Project.approvalFile = path.join(os.homedir(), 'Library', 'Application Support', 'backend-sync', 'approval.json')
+Project.approvalOn = name => !!readJson(Project.approvalFile, {})[name]
+Project.setApproval = (name, on) => {
+  const s = readJson(Project.approvalFile, {})
+  if (on) s[name] = true
+  else delete s[name]
+  fs.mkdirSync(path.dirname(Project.approvalFile), { recursive: true })
+  writeJson(Project.approvalFile, s)
+}
+// Re-read on every check, so turning it on in the folder works without a restart.
+Project.prototype.approval = function () {
+  const asked = this.config.approve || readJson(path.join(this.meta, 'config.json'), {}).approve
+  if (asked && !Project.approvalOn(this.name)) Project.setApproval(this.name, true)
+  return Project.approvalOn(this.name)
 }
 
 module.exports = { Project, ROOT }

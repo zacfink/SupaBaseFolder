@@ -82,10 +82,15 @@ Click **Open** next to a table in the menu bar window, or right-click the menu b
   values get clear errors, like `Row 3, capacity: "lots" is not a number`.
 - It follows the Mac's light or dark mode.
 
-**Approval mode** (for AI agents): add `"approve": true` to a project's `.sync/config.json`. Then every save that
-would change Supabase pauses until you click **Confirm and sync** in the menu bar, with a line saying what it would
-push ("1 new, 2 edited"). An agent can still propose changes by saving files, but it can't act on what it read in
-your data without you. The project's `_schema.md` tells the agent approval is on.
+**Approval mode** (for AI agents): right-click the menu bar icon → **Require approval** → tick the project (or add
+`"approve": true` to its `.sync/config.json`). Then every save that would change Supabase pauses until you click
+**Confirm and sync** in the menu bar, with a line saying what it would push ("1 new, 2 edited"). An agent can still
+propose changes by saving files, but it can't act on what it read in your data without you. The project's
+`_schema.md` tells the agent approval is on.
+
+Approval is stored outside `~/Backend`, in the app's own settings, so the agent can't switch it off: the folder's
+config can only turn it **on**, and only the menu bar turns it off. (Thanks to u/poc-detektd for spotting that a
+flag inside the agent's folder could be flipped by a poisoned row.)
 
 **Settings** (the gear in the window's toolbar):
 

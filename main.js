@@ -196,6 +196,11 @@ else app.whenReady().then(() => {
     { label: 'Open a table', enabled: state().some(p => p.tables.length), submenu: state().flatMap(p => p.tables.map(t => ({
       label: `${p.name} › ${t.table}`, click: () => openTableWindow(p.name, t.table),
     }))) },
+    // the only way to turn approval off: the agent can edit the folder, not this menu
+    { label: 'Require approval', enabled: state().length > 0, submenu: state().map(p => ({
+      label: p.name, type: 'checkbox', checked: Project.approvalOn(p.name),
+      click: item => { Project.setApproval(p.name, item.checked); projects.get(p.name)?.writeSchemaMd(); refresh() },
+    })) },
     { type: 'separator' },
     { label: 'Disconnect a project', enabled: state().length > 0, submenu: state().map(p => ({
       label: `${p.name}…`, click: () => { show(); win.webContents.send('remove', p.name) },
@@ -203,6 +208,7 @@ else app.whenReady().then(() => {
     { type: 'separator' },
     { label: 'Quit SupaBaseFolder', accelerator: 'Command+Q', click: () => app.quit() },
   ])))
+  Project.approvalFile = path.join(app.getPath('userData'), 'approval.json')
   for (const name of Project.list()) startProject(name)
   if (firstRun) shell.openPath(ROOT) // no API adds a sidebar favourite; the window tells Zac to drag it in
   setInterval(() => projects.forEach(p => p.syncAll()), SYNC_EVERY_MS)
