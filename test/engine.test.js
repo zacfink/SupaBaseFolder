@@ -80,3 +80,51 @@ test('approval mode pauses a save that would push, and Confirm lets it through',
   await p.syncTable('t', { confirmDeletes: true })
   assert.equal(pushed.length, 1)
 })
+
+// Approval mode must not be something the agent can switch off: the folder's config can only turn it on,
+// and it's recorded outside ~/Backend, where only the menu bar changes it.
+function approvalProject() {
+  const p = stoppedProject()
+  p.schema.t.columns.name = { type: 'text' }
+  const remote = [{ id: 1, name: 'a' }], pushed = []
+  p.remote = { fetchAll: async () => remote, upsert: async (_, row) => { pushed.push(row); return row }, remove: async () => {} }
+  fs.mkdirSync(path.dirname(p.snapFile('t')), { recursive: true })
+  fs.writeFileSync(p.snapFile('t'), JSON.stringify(remote))
+  const cfgFile = path.join(p.meta, 'config.json')
+  const setCfg = approve => fs.writeFileSync(cfgFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(cfgFile, 'utf8')), approve }))
+  const edit = text => fs.writeFileSync(p.file('t'), JSON.stringify([{ id: 1, name: text }]))
+  return { p, pushed, setCfg, edit }
+}
+
+test('turning approval on in the folder takes effect without a restart', async () => {
+  Project.setApproval('T', false)
+  const { p, pushed, setCfg, edit } = approvalProject()
+  setCfg(true)
+  edit('agent edit')
+  await p.syncTable('t')
+  assert.equal(p.status.t.state, 'paused')
+  assert.deepEqual(pushed, [])
+})
+
+test('the agent cannot switch approval off by editing config.json', async () => {
+  Project.setApproval('T', false)
+  const { p, pushed, setCfg, edit } = approvalProject()
+  setCfg(true)
+  edit('first')
+  await p.syncTable('t')
+  setCfg(false) // a poisoned row talked the agent into this
+  edit('second')
+  await p.syncTable('t')
+  assert.equal(p.status.t.state, 'paused')
+  assert.deepEqual(pushed, [])
+  assert.equal(Project.approvalOn('T'), true)
+})
+
+test('only setApproval (the menu bar) turns approval off', async () => {
+  const { p, pushed, setCfg, edit } = approvalProject()
+  setCfg(false)
+  Project.setApproval('T', false)
+  edit('fine now')
+  await p.syncTable('t')
+  assert.equal(pushed.length, 1)
+})
